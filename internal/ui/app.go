@@ -186,6 +186,18 @@ func (u *AppUI) buildLayout() {
 
 	u.Pages.AddPage("main", mainFlex, true, true)
 	u.App.SetRoot(u.Pages, true)
+	u.App.EnableMouse(true)
+
+	// Mouse support over SSH: Right-click closes any active popup modal
+	u.App.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
+		if action == tview.MouseRightClick && u.Pages.HasPage("modal") {
+			u.Pages.RemovePage("modal")
+			u.activeModalList = nil
+			u.focusFirstRightWindow()
+			return nil, action
+		}
+		return event, action
+	})
 
 	// Global keyboard navigation
 	u.App.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -275,7 +287,7 @@ func (u *AppUI) buildLayout() {
 		return event
 	})
 
-	u.Logf("Auto-Discovery: Modo=%s │ Host=%s │ Ver=%s │ [yellow]←/→[-] Ventana │ [yellow]F1[-] Ayuda ON/OFF │ [yellow]Ctrl+C[-] Salir",
+	u.Logf("Auto-Discovery: Modo=%s │ Host=%s │ Ver=%s │ [yellow]Raton SSH + ←/→[-] Activos │ [yellow]F1[-] Ayuda │ [yellow]Ctrl+C[-] Salir",
 		u.State.Topology, u.State.HostName, u.State.ReleaseVersion)
 }
 
@@ -349,7 +361,7 @@ func (u *AppUI) refreshFooter() {
 		helpState = "OFF"
 	}
 	u.Footer.SetText(fmt.Sprintf(
-		"[yellow][←/→][-] Ventana │ [yellow][↑/↓][-] Fila │ [yellow][Enter][-] Acciones │ [yellow][F1/h][-] Ayuda: [aqua]%s[-] │ [yellow][m][-] Mantenimiento │ [yellow][b][-] Marcos │ [yellow][Ctrl+C/q][-] Salir",
+		"[yellow][Raton/Click][-] o [yellow][←/→/↑/↓][-] Navegar │ [yellow][Enter/Doble-Click][-] Acciones │ [yellow][F1/h][-] Ayuda:[aqua]%s[-] │ [yellow][b][-] Marcos │ [yellow][Ctrl+C/q][-] Salir",
 		helpState,
 	))
 }
