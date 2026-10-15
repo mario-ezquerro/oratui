@@ -118,48 +118,103 @@ Al navegar con las **Flechas (`↑`/`↓`)** y pulsar **`Enter`** sobre cualquie
 
 ---
 
-## Controles de Teclado
+## Controles de Teclado y Ratón (SSH)
 
-| Tecla | Acción |
+| Tecla / Ratón | Acción |
 | :--- | :--- |
-| **`↑` / `↓` / `←` / `→`** | Moverse por el menú lateral, filas de tablas y opciones de ventanas emergentes |
+| **Ratón (Hover / Clic / Clic Derecho)** | **Mover el ratón** resalta en tiempo real la opción del menú o fila de tabla bajo el puntero. **Clic izquierdo** selecciona o abre el submenú de acciones. **Clic derecho** cierra cualquier ventana emergente |
+| **`↑` / `↓` / `←` / `→`** | Moverse por el menú lateral, paneles de ventanas (`←`/`→`), filas de tablas (`↑`/`↓`) y opciones de submenús |
 | **`Enter`** | Abrir ventana emergente de mantenimiento para el elemento seleccionado / Confirmar |
-| **`Tab`** | Alternar el foco entre el menú lateral izquierdo y la tabla de datos activa |
+| **`Tab` / `Shift+Tab`** | Alternar el foco entre el menú lateral izquierdo y las sub-ventanas del módulo activo |
 | **`1` .. `8`** | Saltar directamente a cualquiera de los 8 módulos |
-| **`F1` / `h`** | **Activar / Desactivar la ayuda en los menús** (oculta o muestra las líneas secundarias de ayuda y comandos SQL) |
-| **`m`** | Abrir la ventana rápida global de tareas de mantenimiento desde cualquier vista |
+| **`F1` / `h`** | **Activar / Desactivar la ayuda en los menús** (compacta el menú lateral y los submenús emergentes) |
+| **`c`** | **Cambiar tema de color retro en vivo**: *Norton Commander* $\rightarrow$ *Borland Turbo C++ 3.0* $\rightarrow$ *Fósforo Verde (IBM 5151 CRT)* $\rightarrow$ *Terminal Oscuro* |
 | **`b`** | Alternar en vivo el estilo de marcos: *Mixto (`┌─┐`/`╔═╗`)* $\rightarrow$ *Doble (`╔═╗`)* $\rightarrow$ *Simple (`┌─┐`)* $\rightarrow$ *ASCII (`+-|`)* |
+| **`m`** | Abrir la ventana rápida global de tareas de mantenimiento desde cualquier vista |
 | **`t`** | Alternar topología en modo simulación (`ORACLE RAC` $\leftrightarrow$ `SINGLE INSTANCE`) |
-| **`Esc` / `←`** | Cerrar ventana modal emergente o devolver el foco a la ventana anterior / menú principal |
+| **`Esc` / `←`** | Cerrar ventana modal emergente o devolver el foco al menú principal |
 | **`Ctrl+C` / `q`** | Salir inmediatamente de `ora-tui` |
 
 ---
 
-## Instalación y Uso
+## Instalación y Reinstalación (`dnf`, `rpm` y `apt-get`)
 
-### 1. Instalar directamente en RHEL / Oracle Linux 7, 8 o 9 (vía `dnf`)
+### 1. Usando `dnf` (RHEL / Oracle Linux / Rocky / AlmaLinux 8 y 9)
 
-#### Opción A — Instalar directamente desde GitHub por URL (1 comando en el servidor)
-Si el servidor tiene salida a GitHub, puedes instalar el paquete `.rpm` precompilado directamente con `dnf`:
+#### Instalar por primera vez con `dnf`
+* **Directamente desde GitHub:**
+  ```bash
+  sudo dnf install -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.0.0-1.x86_64.rpm
+  ```
+* **Desde un archivo `.rpm` descargado localmente (o copiado por `scp`):**
+  ```bash
+  sudo dnf install -y ./ora-tui-1.0.0-1.x86_64.rpm
+  ```
+
+#### Reinstalar / Actualizar a la última compilación con `dnf`
+Cuando se actualiza el paquete en GitHub manteniendo la misma versión (`1.0.0-1`), usa `dnf reinstall` (y limpia la caché si es necesario):
 ```bash
-sudo dnf install -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.0.0-1.x86_64.rpm
-sudo ora-tui
+sudo dnf clean packages
+sudo dnf reinstall -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.0.0-1.x86_64.rpm
 ```
+*(O si tienes el archivo en local: `sudo dnf reinstall -y ./ora-tui-1.0.0-1.x86_64.rpm`)*
 
-#### Opción B — Copiar el `.rpm` por `scp` a un servidor sin salida a Internet
-Desde tu equipo local (donde has clonado el repositorio):
+---
+
+### 2. Usando `rpm` directamente (RHEL / Oracle Linux / CentOS / SUSE)
+
+#### Instalar por primera vez con `rpm`
+* **Directamente desde GitHub:**
+  ```bash
+  sudo rpm -ivh https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.0.0-1.x86_64.rpm
+  ```
+* **Desde un archivo local:**
+  ```bash
+  sudo rpm -ivh ./ora-tui-1.0.0-1.x86_64.rpm
+  ```
+
+#### Reinstalar / Forzar actualización con `rpm`
+Para reinstalar encima de una versión ya instalada (forzando la sustitución de los ficheros con `--replacepkgs` / `--force`):
+* **Directamente desde GitHub:**
+  ```bash
+  sudo rpm -Uvh --replacepkgs --force https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.0.0-1.x86_64.rpm
+  ```
+* **Desde un archivo local:**
+  ```bash
+  sudo rpm -Uvh --replacepkgs --force ./ora-tui-1.0.0-1.x86_64.rpm
+  ```
+
+---
+
+### 3. Usando `apt-get` / `apt` (Debian / Ubuntu)
+
+El repositorio incluye también el paquete Debian/Ubuntu precompilado en `dist/ora-tui_1.0.0-1_amd64.deb`.
+
+#### Instalar por primera vez con `apt-get`
 ```bash
-scp dist/ora-tui-1.0.0-1.x86_64.rpm root@srv-dbgriar-des:/root/
+curl -fL -o /tmp/ora-tui_1.0.0-1_amd64.deb https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.0.0-1_amd64.deb
+sudo apt-get install -y /tmp/ora-tui_1.0.0-1_amd64.deb
 ```
-Y dentro del servidor Linux (`root@srv-dbgriar-des`):
+*(También puedes usar `sudo dpkg -i /tmp/ora-tui_1.0.0-1_amd64.deb`)*
+
+#### Reinstalar / Actualizar a la última compilación con `apt-get`
+Para volver a descargar el paquete `.deb` actualizado desde GitHub y forzar su reinstalación con `apt-get`:
 ```bash
-sudo dnf install -y /root/ora-tui-1.0.0-1.x86_64.rpm
+curl -fL -o /tmp/ora-tui_1.0.0-1_amd64.deb https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.0.0-1_amd64.deb
+sudo apt-get install --reinstall -y /tmp/ora-tui_1.0.0-1_amd64.deb
+```
+*(O bien con `dpkg`: `sudo dpkg -i --force-overwrite /tmp/ora-tui_1.0.0-1_amd64.deb`)*
+
+---
+
+### 4. Ejecutar `ora-tui` una vez instalado
+```bash
 sudo ora-tui
 ```
 
 ---
 
-### 2. Ejecutar en Modo Simulación / Mock (macOS / Linux sin Oracle instalado)
+### 5. Ejecutar en Modo Simulación / Mock (macOS / Linux sin Oracle instalado)
 Si ejecutas `ora-tui` en un equipo de desarrollo sin Oracle instalado (o pasas `--mock`), se inicia automáticamente el simulador interactivo completo:
 
 ```bash
@@ -176,13 +231,13 @@ make mock
 
 ---
 
-### 3. Compilar Binario Estático y Generar el Paquete RPM desde el Código Fuente
+### 6. Compilar Binario Estático y Generar los Paquetes `.rpm` y `.deb` desde el Código Fuente
 ```bash
 # Ejecutar tests unitarios y compilar binarios (nativo + Linux amd64 estático CGO_ENABLED=0):
 make all
 
-# Generar automáticamente el paquete dist/ora-tui-1.0.0-1.x86_64.rpm (usa nfpm vía Go):
-make rpm
+# Generar automáticamente ambos paquetes en dist/ (.rpm y .deb):
+make packages
 ```
 
 ---
@@ -198,8 +253,9 @@ ora-tui/
 │   ├── collector/                 # Colectores SQL*Plus, crsctl, olsnodes, srvctl, lsnrctl y modo Mock
 │   ├── actions/                   # Flujos de parada/arranque, Node Drain, mantenimiento DBA, RMAN y ADRCI
 │   ├── executor/runner.go         # Ejecutor de comandos con cambio de UID/GID y streaming en vivo
-│   └── ui/                        # Interfaz tview/tcell con marcos Unicode (┌─┐ / ╔═╗) y modales
-├── packaging/                     # Configuración RPM (nfpm.yaml, ora-tui.spec, sudoers.ora-tui)
-├── Makefile                       # Automatización de compilación, tests y empaquetado
+│   └── ui/                        # Interfaz tview/tcell con ratón SSH y temas Norton Commander / Turbo C / Fósforo Verde
+├── packaging/                     # Configuración nfpm.yaml, ora-tui.spec, sudoers.ora-tui
+├── dist/                          # Paquetes precompilados (.rpm y .deb) listos para instalar desde GitHub
+├── Makefile                       # Automatización de compilación, tests y empaquetado (.rpm / .deb)
 └── SPEC.md                        # Especificación técnica detallada
 ```

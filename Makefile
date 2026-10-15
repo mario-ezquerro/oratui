@@ -1,7 +1,7 @@
 BINARY_NAME=ora-tui
 VERSION=1.0.0
 
-.PHONY: all build build-linux test preview mock rpm clean
+.PHONY: all build build-linux test preview mock rpm deb packages clean
 
 all: test build build-linux
 
@@ -23,6 +23,12 @@ mock: build
 rpm: build-linux
 	mkdir -p dist
 	go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest pkg --packager rpm --config packaging/nfpm.yaml --target dist/$(BINARY_NAME)-$(VERSION)-1.x86_64.rpm
+
+deb: build-linux
+	mkdir -p dist
+	go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest pkg --packager deb --config packaging/nfpm.yaml --target dist/$(BINARY_NAME)_$(VERSION)-1_amd64.deb
+
+packages: rpm deb
 
 clean:
 	rm -rf bin/ dist/
