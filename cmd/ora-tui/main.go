@@ -25,7 +25,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Println("ora-tui v1.3.0 (MS-DOS Retro Themes + Server/SAN Multipath Health Checks)")
+		fmt.Println("ora-tui v1.4.0 (MS-DOS Retro Themes + Server/SAN Health Checks + Operation Output Window)")
 		return
 	}
 

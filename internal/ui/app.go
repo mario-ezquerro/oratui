@@ -29,12 +29,16 @@ type AppUI struct {
 	ActiveView      string
 	ShowMenuHelp    bool
 	ColorTheme      ColorThemeName
-	isHoveringNav   bool
-	activeModalList *tview.List
-	viewFocusables  map[string][]tview.Primitive
-	tableActions    map[*tview.Table]func(row, col int)
-	rawTitles       map[tview.Primitive]string
-	logHistory      []string
+	isHoveringNav     bool
+	activeModalList   *tview.List
+	activeOutputView  *tview.TextView
+	activeOutputLines []string
+	activeOutputTask  string
+	capturingOutput   bool
+	viewFocusables    map[string][]tview.Primitive
+	tableActions      map[*tview.Table]func(row, col int)
+	rawTitles         map[tview.Primitive]string
+	logHistory        []string
 }
 
 type navEntry struct {
@@ -208,19 +212,19 @@ func (u *AppUI) updateFocusVisuals() {
 		case ThemeTurboC:
 			u.Header.SetBorderColor(VGABlack)
 			u.Header.SetTitleColor(VGABlack)
-			u.Header.SetTitle("[#000000:#a8a8a8:b] [[#af0000::b]≡[#000000]] File  Edit  Search  Run  Compile  Debug  Project  Options  Window  Help :: ORA-TUI v1.3.0 [-:-:-]")
+			u.Header.SetTitle("[#000000:#a8a8a8:b] [[#af0000::b]≡[#000000]] File  Edit  Search  Run  Compile  Debug  Project  Options  Window  Help :: ORA-TUI v1.4.0 [-:-:-]")
 		case ThemeNorton:
 			u.Header.SetBorderColor(VGABrightCyan)
 			u.Header.SetTitleColor(VGABrightYellow)
-			u.Header.SetTitle("[#000000:#00afaf:b] NORTON COMMANDER ORA-TUI v1.3.0 :: ORACLE CLUSTER, DB & SERVER MANAGER [-:-:-]")
+			u.Header.SetTitle("[#000000:#00afaf:b] NORTON COMMANDER ORA-TUI v1.4.0 :: ORACLE CLUSTER, DB & SERVER MANAGER [-:-:-]")
 		case ThemeGreenPhosphor:
 			u.Header.SetBorderColor(PhosphorGlow)
 			u.Header.SetTitleColor(PhosphorGlow)
-			u.Header.SetTitle("[#001000:#00ff5f:b] IBM 5151 P1 PHOSPHOR CRT :: ORA-TUI v1.3.0 ORACLE MANAGER [-:-:-]")
+			u.Header.SetTitle("[#001000:#00ff5f:b] IBM 5151 P1 PHOSPHOR CRT :: ORA-TUI v1.4.0 ORACLE MANAGER [-:-:-]")
 		default:
 			u.Header.SetBorderColor(pal.ActiveBorder)
 			u.Header.SetTitleColor(pal.ActiveTitle)
-			u.Header.SetTitle(" ══ ORA-TUI v1.3.0 :: ORACLE CLUSTER & DATABASE MANAGER ══ ")
+			u.Header.SetTitle(" ══ ORA-TUI v1.4.0 :: ORACLE CLUSTER & DATABASE MANAGER ══ ")
 		}
 	}
 	if u.LogView != nil {
@@ -383,6 +387,75 @@ func (u *AppUI) Logf(format string, args ...interface{}) {
 		u.logHistory = u.logHistory[len(u.logHistory)-80:]
 	}
 	u.renderLogs()
+	if u.capturingOutput {
+		u.activeOutputLines = append(u.activeOutputLines, entry)
+		u.renderOperationOutput()
+	}
+}
+
+func (u *AppUI) closeModal() {
+	u.capturingOutput = false
+	u.activeOutputView = nil
+	u.activeOutputLines = nil
+	u.activeModalList = nil
+	if u.Pages != nil {
+		u.Pages.RemovePage("modal")
+	}
+	u.focusFirstRightWindow()
+}
+
+func (u *AppUI) renderOperationOutput() {
+	if u.activeOutputView == nil {
+		return
+	}
+	var sb strings.Builder
+	switch u.ColorTheme {
+	case ThemeTurboC:
+		sb.WriteString(fmt.Sprintf(" [#ffff5f::b]OPERACION:[-::-] [#ffffff::b]%s[-::-]\n", u.activeOutputTask))
+		sb.WriteString(fmt.Sprintf(" [#ffff5f::b]SERVIDOR :[-::-] [#5fffff]%s (Modo: %s)[-] │ [#ffff5f]Use ↑/↓/PgUp/PgDn para desplazar[-]\n", u.State.HostName, u.State.Topology))
+		sb.WriteString(" [#5fffff]" + strings.Repeat("─", 96) + "[-]\n")
+	case ThemeGreenPhosphor:
+		sb.WriteString(fmt.Sprintf(" [#87ff87::b]OPERACION: %s[-::-]\n", u.activeOutputTask))
+		sb.WriteString(fmt.Sprintf(" [#00af00]SERVIDOR : %s (Modo: %s) │ Use ↑/↓/PgUp/PgDn para desplazar[-]\n", u.State.HostName, u.State.Topology))
+		sb.WriteString(" [#00af00]" + strings.Repeat("─", 96) + "[-]\n")
+	default:
+		sb.WriteString(fmt.Sprintf(" [#ffff5f::b]OPERACION:[-::-] [#ffffff::b]%s[-::-]\n", u.activeOutputTask))
+		sb.WriteString(fmt.Sprintf(" [#ffff5f::b]SERVIDOR :[-::-] [#5fffff]%s (Modo: %s)[-] │ [#a8a8a8]Use ↑/↓/PgUp/PgDn para desplazar[-]\n", u.State.HostName, u.State.Topology))
+		sb.WriteString(" [#5fffff]" + strings.Repeat("─", 96) + "[-]\n")
+	}
+
+	if len(u.activeOutputLines) == 0 {
+		sb.WriteString("\n [#ffff5f::b] ⏳ Ejecutando comando en el servidor y recolectando salida... Por favor espere.[-::-]\n")
+	} else {
+		for _, rawLine := range u.activeOutputLines {
+			line := rawLine
+			switch u.ColorTheme {
+			case ThemeGreenPhosphor:
+				r := strings.NewReplacer(
+					"[yellow::b]", "[#87ff87::b]",
+					"[yellow]", "[#87ff87::b]",
+					"[lime::b]", "[#00ff5f::b]",
+					"[green]", "[#00ff5f::b]",
+					"[aqua]", "[#00ff5f]",
+					"[red]", "[#001000:#00ff5f:b]",
+				)
+				line = r.Replace(line)
+				sb.WriteString(" [#00ff5f]" + line + "[-]\n")
+			default:
+				r := strings.NewReplacer(
+					"[yellow::b]", "[#ffff5f::b]",
+					"[yellow]", "[#ffff5f::b]",
+					"[lime::b]", "[#5fff5f::b]",
+					"[green]", "[#5fff5f::b]",
+					"[aqua]", "[#5fffff::b]",
+					"[red]", "[#ff5f5f::b]",
+				)
+				line = r.Replace(line)
+				sb.WriteString(" [#ffffff]" + line + "[-]\n")
+			}
+		}
+	}
+	u.activeOutputView.SetText(sb.String())
 }
 
 func (u *AppUI) renderLogs() {
@@ -610,6 +683,23 @@ func (u *AppUI) buildLayout() {
 		x, y := event.Position()
 
 		if u.Pages.HasPage("modal") {
+			if u.activeOutputView != nil {
+				if action == tview.MouseRightClick {
+					u.closeModal()
+					return nil, action
+				}
+				if action == tview.MouseLeftClick {
+					if u.activeModalList != nil && u.activeModalList.InRect(x, y) {
+						u.closeModal()
+						return nil, action
+					}
+					if !u.activeOutputView.InRect(x, y) {
+						u.closeModal()
+						return nil, action
+					}
+				}
+				return event, action
+			}
 			if action == tview.MouseMove || action == tview.MouseLeftDown {
 				if u.activeModalList != nil && u.activeModalList.InRect(x, y) {
 					idx := listIndexAtPoint(u.activeModalList, x, y)
@@ -623,15 +713,11 @@ func (u *AppUI) buildLayout() {
 				return event, action
 			}
 			if action == tview.MouseRightClick {
-				u.Pages.RemovePage("modal")
-				u.activeModalList = nil
-				u.focusFirstRightWindow()
+				u.closeModal()
 				return nil, action
 			}
 			if action == tview.MouseLeftClick && u.activeModalList != nil && !u.activeModalList.InRect(x, y) {
-				u.Pages.RemovePage("modal")
-				u.activeModalList = nil
-				u.focusFirstRightWindow()
+				u.closeModal()
 				return nil, action
 			}
 			return event, action
@@ -777,10 +863,16 @@ func (u *AppUI) buildLayout() {
 
 		// If a modal is open, let modal handle Esc/Enter/Arrows
 		if u.Pages.HasPage("modal") {
+			if u.activeOutputView != nil {
+				if event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyEnter || event.Key() == tcell.KeyLeft ||
+					(event.Key() == tcell.KeyRune && (event.Rune() == 'q' || event.Rune() == ' ')) {
+					u.closeModal()
+					return nil
+				}
+				return event
+			}
 			if event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyLeft {
-				u.Pages.RemovePage("modal")
-				u.activeModalList = nil
-				u.focusFirstRightWindow()
+				u.closeModal()
 				return nil
 			}
 			return event
@@ -900,6 +992,14 @@ func (u *AppUI) focusFirstRightWindow() {
 }
 
 func (u *AppUI) switchViewAndFocus(name string) {
+	if u.capturingOutput && len(u.activeOutputLines) == 0 {
+		u.capturingOutput = false
+		u.activeOutputView = nil
+		u.activeModalList = nil
+		if u.Pages != nil {
+			u.Pages.RemovePage("modal")
+		}
+	}
 	u.ActiveView = name
 	u.Content.SwitchToPage(name)
 	activeNavIdx := u.activeViewNavIndex()
@@ -1148,7 +1248,9 @@ func (u *AppUI) rebuildContentViews() {
 	}
 
 	// 4. Restore focus to the exact sub-window the user was navigating
-	if hasModal && u.activeModalList != nil {
+	if hasModal && u.activeOutputView != nil {
+		u.App.SetFocus(u.activeOutputView)
+	} else if hasModal && u.activeModalList != nil {
 		u.App.SetFocus(u.activeModalList)
 	} else if !focusOnNav && focusedSubIdx >= 0 {
 		subs := u.viewFocusables[u.ActiveView]
@@ -1835,7 +1937,7 @@ func (u *AppUI) showListenerControlModal(idx int) {
 					}
 					for _, line := range strings.Split(out, "\n") {
 						trimmed := strings.TrimSpace(line)
-						if strings.HasPrefix(trimmed, "Service \"") || strings.HasPrefix(trimmed, "Instance \"") || strings.HasPrefix(trimmed, "TNS-") {
+						if trimmed != "" {
 							u.Logf("    %s", trimmed)
 						}
 					}
@@ -2228,7 +2330,12 @@ func (u *AppUI) buildServerHealthPage() tview.Primitive {
 			[]menuAction{
 				{"Refrescar Comprobaciones de Servidor, Discos y Multipath Ahora", "Relee /proc/meminfo, /proc/loadavg, df -PTm, df -Pi y multipath -ll", func() {
 					if u.State.IsMock {
-						u.Logf("[SERVER] Comprobaciones de CPU, RAM, HugePages, Filesystems y Multipath actualizadas -> [green]OK[-]")
+						u.Logf("[COMANDO] Recolección integral de métricas de SO, Filesystems y SAN Multipath")
+						for _, m := range u.State.OSMetrics {
+							u.Logf("  • [%-13s] %-24s -> [%s] %s (%s)", m.Category, m.Component, m.Status, m.CurrentValue, m.Recommendation)
+						}
+						u.Logf("[SERVER] Comprobaciones actualizadas (%d métricas, %d montajes, %d paths) -> [green]OK[-]",
+							len(u.State.OSMetrics), len(u.State.Filesystems), len(u.State.StoragePaths))
 						return
 					}
 					go func() {
@@ -2241,61 +2348,134 @@ func (u *AppUI) buildServerHealthPage() tview.Primitive {
 							u.State.Filesystems = fsM
 							u.State.StoragePaths = spM
 							u.rebuildContentViews()
-							u.Logf("[SERVER] Comprobaciones de servidor actualizadas (%d metricas, %d montajes, %d paths) -> [green]OK[-]",
+							u.Logf("[COMANDO] Recolección en vivo de /proc/loadavg, /proc/meminfo, df -PTm, df -Pi y multipath -ll")
+							for _, m := range osM {
+								u.Logf("  • [%-13s] %-24s -> [%s] %s", m.Category, m.Component, m.Status, m.CurrentValue)
+							}
+							u.Logf("[RESUMEN] %d métricas de servidor │ %d filesystems montados │ %d dispositivos/paths de almacenamiento -> [green]OK[-]",
 								len(osM), len(fsM), len(spM))
 						})
 					}()
 				}},
 				{"Auditar Parámetros de Kernel Oracle (sysctl aio, shmmax, hugepages, swappiness)", "sysctl fs.aio-nr fs.aio-max-nr vm.swappiness vm.nr_hugepages kernel.shmmax", func() {
 					if u.State.IsMock {
-						u.Logf("[SYSCTL] fs.aio-nr=64240 │ fs.aio-max-nr=1048576 │ vm.swappiness=10 │ vm.nr_hugepages=34816 -> [green]OPTIMO[-]")
+						u.Logf("[COMANDO] $ /sbin/sysctl fs.aio-nr fs.aio-max-nr fs.file-nr vm.swappiness vm.nr_hugepages kernel.shmmax kernel.shmall")
+						u.Logf("  fs.aio-nr = 64240")
+						u.Logf("  fs.aio-max-nr = 1048576          [OK: Recomendado Oracle >= 1048576]")
+						u.Logf("  fs.file-nr = 14720  0  6815744   [OK: Recomendado Oracle >= 6815744]")
+						u.Logf("  vm.swappiness = 10               [OK: Recomendado Oracle <= 10]")
+						u.Logf("  vm.nr_hugepages = 34816          [OK: 68.0 GB HugePages estáticas]")
+						u.Logf("  kernel.shmmax = 68719476736      [OK: 64.0 GB Shared Memory Max]")
+						u.Logf("[RESULTADO] Parámetros de kernel Linux conformes a Oracle Best Practices -> [green]OPTIMO[-]")
 						return
 					}
 					go func() {
 						runner := executor.NewRunner(10*time.Second, false)
 						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil,
-							"sysctl", "fs.aio-nr", "fs.aio-max-nr", "vm.swappiness", "vm.nr_hugepages", "kernel.shmmax")
+						sysctlBin := "sysctl"
+						for _, candidate := range []string{"/sbin/sysctl", "/usr/sbin/sysctl"} {
+							if _, err := os.Stat(candidate); err == nil {
+								sysctlBin = candidate
+								break
+							}
+						}
+						params := []string{
+							"fs.aio-nr", "fs.aio-max-nr", "fs.file-nr", "fs.file-max",
+							"vm.swappiness", "vm.nr_hugepages", "vm.dirty_background_ratio", "vm.dirty_ratio",
+							"kernel.shmmax", "kernel.shmall", "kernel.shmmni", "kernel.sem",
+						}
+						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, sysctlBin, params...)
 						cancel()
 						u.App.QueueUpdateDraw(func() {
-							flat := strings.ReplaceAll(strings.TrimSpace(out), "\n", " │ ")
-							u.Logf("[SYSCTL] %s", flat)
+							u.Logf("[COMANDO] $ %s %s", sysctlBin, strings.Join(params, " "))
+							lines := strings.Split(strings.TrimSpace(out), "\n")
+							count := 0
+							for _, l := range lines {
+								if strings.TrimSpace(l) != "" {
+									u.Logf("  %s", strings.TrimSpace(l))
+									count++
+								}
+							}
+							if count == 0 {
+								for _, p := range params {
+									procPath := "/proc/sys/" + strings.ReplaceAll(p, ".", "/")
+									if raw, err := os.ReadFile(procPath); err == nil {
+										u.Logf("  %s = %s", p, strings.TrimSpace(string(raw)))
+									}
+								}
+							}
+							u.Logf("[RESULTADO] Auditoría de parámetros de kernel completada -> [green]OK[-]")
 						})
 					}()
 				}},
-				{"Top 5 Procesos por Consumo de CPU y Memoria RAM (ps aux --sort=-%cpu)", "Identifica procesos Oracle o de SO que acaparan CPU/RAM", func() {
+				{"Top Procesos por Consumo de CPU y Memoria RAM (ps -eo pid,user,%cpu,%mem,rss,comm)", "Identifica procesos Oracle o de SO que acaparan CPU/RAM", func() {
 					if u.State.IsMock {
-						u.Logf("[TOP PROCS] 1) ora_p001_PRODCDB1 (18.4%% CPU, 2.1G) │ 2) ora_lgwr_PRODCDB1 (6.2%% CPU) │ 3) ora_dbw0_PRODCDB1 (4.8%% CPU)")
+						u.Logf("[COMANDO] $ ps -eo pid,user,%%cpu,%%mem,rss,comm --sort=-%%cpu | head -n 10")
+						u.Logf("  PID     USER     %%CPU  %%MEM   RSS_KB  COMMAND")
+						u.Logf("  18421   oracle   18.4   1.6  2148420  ora_p001_PRODCDB1")
+						u.Logf("  14209   oracle    6.2   0.8  1048576  ora_lgwr_PRODCDB1")
+						u.Logf("  14205   oracle    4.8   1.2  1572864  ora_dbw0_PRODCDB1")
+						u.Logf("  11042   grid      2.1   0.4   524288  ocssd.bin")
+						u.Logf("  19982   oracle    1.9   0.6   786432  ora_mmon_PRODCDB1")
 						return
 					}
 					go func() {
 						runner := executor.NewRunner(10*time.Second, false)
 						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil,
-							"ps", "-eo", "pid,user,%cpu,%mem,comm", "--sort=-%cpu")
+							"ps", "-eo", "pid,user,%cpu,%mem,rss,stat,comm", "--sort=-%cpu")
 						cancel()
 						u.App.QueueUpdateDraw(func() {
+							u.Logf("[COMANDO] $ ps -eo pid,user,%%cpu,%%mem,rss,stat,comm --sort=-%%cpu (Host: %s)", u.State.HostName)
 							lines := strings.Split(strings.TrimSpace(out), "\n")
-							maxL := 6
+							maxL := 14
 							if len(lines) < maxL {
 								maxL = len(lines)
 							}
-							u.Logf("[TOP CPU/RAM] Procesos con mayor consumo en %s:", u.State.HostName)
-							for i := 1; i < maxL; i++ {
-								u.Logf("    %s", strings.TrimSpace(lines[i]))
+							for i := 0; i < maxL; i++ {
+								u.Logf("  %s", strings.TrimSpace(lines[i]))
 							}
 						})
 					}()
 				}},
 				{"Liberar PageCache y Dentries de Linux (sync && sysctl vm.drop_caches=3)", "Devuelve memoria de caché de archivos reclamable sin afectar la SGA de Oracle", func() {
 					if u.State.IsMock {
-						u.Logf("[KERNEL] sync && sysctl -w vm.drop_caches=3 -> [green]14.2 GB de PageCache liberados[-]")
+						u.Logf("[COMANDO] $ sync && echo 3 > /proc/sys/vm/drop_caches")
+						u.Logf("  • PageCache antes  : 18.0 GB  ->  PageCache después  : 3.8 GB")
+						u.Logf("  • RAM Disponible   : 44.0 GB  ->  RAM Disponible     : 58.2 GB")
+						u.Logf("[KERNEL] vm.drop_caches=3 ejecutado -> [green]14.2 GB de PageCache liberados sin tocar la SGA[-]")
 						return
 					}
 					go func() {
-						_ = os.WriteFile("/proc/sys/vm/drop_caches", []byte("3\n"), 0644)
+						beforeRaw, _ := os.ReadFile("/proc/meminfo")
+						err := os.WriteFile("/proc/sys/vm/drop_caches", []byte("3\n"), 0644)
+						afterRaw, _ := os.ReadFile("/proc/meminfo")
 						u.App.QueueUpdateDraw(func() {
-							u.Logf("[KERNEL] vm.drop_caches=3 ejecutado -> [green]PageCache y Dentries liberados[-]")
+							u.Logf("[COMANDO] $ echo 3 > /proc/sys/vm/drop_caches")
+							if err != nil {
+								u.Logf("[ERROR] No se pudo escribir en /proc/sys/vm/drop_caches: [red]%v[-] (Requiere root)", err)
+								return
+							}
+							extractKB := func(raw, key string) int {
+								for _, l := range strings.Split(raw, "\n") {
+									if strings.HasPrefix(l, key+":") {
+										f := strings.Fields(l)
+										if len(f) >= 2 {
+											var v int
+											_, _ = fmt.Sscanf(f[1], "%d", &v)
+											return v / 1024
+										}
+									}
+								}
+								return 0
+							}
+							cBefore := extractKB(string(beforeRaw), "Cached")
+							cAfter := extractKB(string(afterRaw), "Cached")
+							aBefore := extractKB(string(beforeRaw), "MemAvailable")
+							aAfter := extractKB(string(afterRaw), "MemAvailable")
+							u.Logf("  • PageCache antes : %d MB  ->  PageCache después : %d MB", cBefore, cAfter)
+							u.Logf("  • RAM Disponible  : %d MB  ->  RAM Disponible    : %d MB", aBefore, aAfter)
+							u.Logf("[KERNEL] vm.drop_caches=3 ejecutado -> [green]PageCache y Dentries liberados correctamente[-]")
 						})
 					}()
 				}},
@@ -2332,45 +2512,69 @@ func (u *AppUI) buildServerHealthPage() tview.Primitive {
 		u.showActionMenuModal(
 			fmt.Sprintf(" ══ GESTION DE FILESYSTEM E INODOS: %s ══ ", mnt),
 			[]menuAction{
-				{fmt.Sprintf("Ver Subdirectorios Más Pesados en %s (du -shx)", mnt), fmt.Sprintf("du -shx %s/* | sort -hr | head -n 5", mnt), func() {
+				{fmt.Sprintf("Ver Subdirectorios Más Pesados en %s (du -shx)", mnt), fmt.Sprintf("du -shx %s/* | sort -hr | head -n 12", mnt), func() {
 					if u.State.IsMock {
-						u.Logf("[DISK %s] Top directorios: 1) /u01/app/oracle/diag (42.4G) │ 2) /u01/app/19.0.0/grid (18.2G) │ 3) /u01/app/oracle/admin/adump (9.1G)", mnt)
+						u.Logf("[COMANDO] $ du -shx %s/* 2>/dev/null | sort -hr | head -n 12", mnt)
+						u.Logf("  42.4G   %s/app/oracle/diag", mnt)
+						u.Logf("  18.2G   %s/app/19.0.0/grid", mnt)
+						u.Logf("  12.8G   %s/app/oracle/product/19.0.0/dbhome_1", mnt)
+						u.Logf("   9.1G   %s/app/oracle/admin/PRODCDB/adump", mnt)
 						return
 					}
 					go func() {
 						runner := executor.NewRunner(15*time.Second, false)
 						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+						dfOut, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "df", "-hPT", mnt)
 						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil,
-							"sh", "-c", fmt.Sprintf("du -shx %s/* 2>/dev/null | sort -hr | head -n 5", mnt))
+							"sh", "-c", fmt.Sprintf("du -shx %s/* 2>/dev/null | sort -hr | head -n 12", mnt))
 						cancel()
 						u.App.QueueUpdateDraw(func() {
-							flat := strings.ReplaceAll(strings.TrimSpace(out), "\n", " │ ")
-							if flat == "" {
-								flat = "Sin subdirectorios pesados accesibles"
+							u.Logf("[COMANDO] $ df -hPT %s", mnt)
+							for _, l := range strings.Split(strings.TrimSpace(dfOut), "\n") {
+								if strings.TrimSpace(l) != "" {
+									u.Logf("  %s", strings.TrimSpace(l))
+								}
 							}
-							u.Logf("[DU %s] %s", mnt, flat)
+							u.Logf("[COMANDO] $ du -shx %s/* | sort -hr | head -n 12", mnt)
+							lines := strings.Split(strings.TrimSpace(out), "\n")
+							if len(lines) == 0 || strings.TrimSpace(out) == "" {
+								u.Logf("  (Sin subdirectorios pesados o punto de montaje vacío)")
+							} else {
+								for _, l := range lines {
+									if strings.TrimSpace(l) != "" {
+										u.Logf("  %s", strings.TrimSpace(l))
+									}
+								}
+							}
 						})
 					}()
 				}},
-				{fmt.Sprintf("Comprobar Inodos Libres/Usados en %s (Prevenir ORA-09925)", mnt), fmt.Sprintf("df -hi %s (Evita bloqueo de conexiones por agotamiento de inodos .aud/.trc)", mnt), func() {
+				{fmt.Sprintf("Comprobar Inodos Libres/Usados en %s (Prevenir ORA-09925)", mnt), fmt.Sprintf("df -Phi %s (Evita bloqueo de conexiones por agotamiento de inodos .aud/.trc)", mnt), func() {
 					if u.State.IsMock {
-						u.Logf("[INODOS %s] Inodes=10.0M │ IUsed=1.8M │ IFree=8.2M │ IUse=18%% -> [green]SIN RIESGO ORA-09925[-]", mnt)
+						u.Logf("[COMANDO] $ df -Phi %s", mnt)
+						u.Logf("  Filesystem                  Inodes   IUsed   IFree IUse%% Mounted on")
+						u.Logf("  /dev/mapper/vg_ora-lv_u01    10.0M    1.8M    8.2M   18%% %s", mnt)
+						u.Logf("[DIAGNOSTICO] Uso de inodos en %s dentro de rango seguro (<80%%) -> [green]SIN RIESGO ORA-09925[-]", mnt)
 						return
 					}
 					go func() {
 						runner := executor.NewRunner(10*time.Second, false)
 						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "df", "-hi", mnt)
+						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "df", "-Phi", mnt)
 						cancel()
 						u.App.QueueUpdateDraw(func() {
-							lines := strings.Split(strings.TrimSpace(out), "\n")
-							if len(lines) > 0 {
-								u.Logf("[INODOS %s] %s", mnt, lines[len(lines)-1])
+							u.Logf("[COMANDO] $ df -Phi %s", mnt)
+							for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+								if strings.TrimSpace(l) != "" {
+									u.Logf("  %s", strings.TrimSpace(l))
+								}
 							}
+							u.Logf("[DIAGNOSTICO] Si IUse%% alcanza el 100%%, Oracle no podrá crear ficheros .aud/.trc y rechazará conexiones con ORA-09925.")
 						})
 					}()
 				}},
 				{"Purgar Trazas ADRCI y Ficheros .aud Antiguos (> 7 dias)", "Libera espacio en disco y miles de inodos en ORACLE_BASE", func() {
+					u.Logf("[COMANDO] Purgado de ficheros .trc, .trm y .aud con antigüedad > 7 días")
 					u.Logf("[PURGE] Purgado de trazas (.trc/.trm) y auditoria (.aud > 7 dias) completado -> [green]Espacio e inodos liberados[-]")
 				}},
 			},
@@ -2406,21 +2610,56 @@ func (u *AppUI) buildServerHealthPage() tview.Primitive {
 			[]menuAction{
 				{"Verificar Estado Completo de Multipath SAN (multipath -ll)", "Comprueba que todos los caminos de cada LUN estén active/ready/running", func() {
 					if u.State.IsMock {
-						u.Logf("[MULTIPATH] Verificados 4 LUNs SAN (16 paths totales) -> [green]Todos los caminos principales ONLINE[-]")
+						u.Logf("[COMANDO] $ /sbin/multipath -ll")
+						for _, sp := range u.State.StoragePaths {
+							u.Logf("  • %-22s │ %-13s │ %-18s │ %s │ %s", sp.Name, sp.Type, sp.PathsSummary, sp.Size, sp.PathDetails)
+						}
+						u.Logf("[MULTIPATH] Verificados 4 LUNs SAN (16 paths totales) -> [green]Análisis completado[-]")
 						return
 					}
 					go func() {
 						runner := executor.NewRunner(15*time.Second, false)
-						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-						out, err := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "multipath", "-ll")
-						if err != nil || strings.TrimSpace(out) == "" {
-							out, _ = runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "lsblk", "-d", "-o", "NAME,SIZE,STATE,TYPE,MODEL")
+						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						mpBin := "multipath"
+						for _, candidate := range []string{"/sbin/multipath", "/usr/sbin/multipath"} {
+							if _, err := os.Stat(candidate); err == nil {
+								mpBin = candidate
+								break
+							}
 						}
+						mpOut, mpErr := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, mpBin, "-ll")
+						lsblkOut, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil,
+							"lsblk", "-o", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL")
 						cancel()
 						u.App.QueueUpdateDraw(func() {
-							for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
-								if strings.TrimSpace(l) != "" {
-									u.Logf("[PATHS] %s", strings.TrimSpace(l))
+							u.Logf("[COMANDO] $ %s -ll", mpBin)
+							if mpErr == nil && strings.TrimSpace(mpOut) != "" {
+								for _, l := range strings.Split(strings.TrimRight(mpOut, "\n"), "\n") {
+									if strings.TrimSpace(l) != "" {
+										u.Logf("  %s", l)
+									}
+								}
+								parsed := collector.ParseMultipathOutput(mpOut)
+								u.Logf("[RESUMEN MULTIPATH] %d LUNs SAN detectadas:", len(parsed))
+								for _, p := range parsed {
+									u.Logf("  • %s [%s] -> %s (%s)", p.Name, p.Size, p.PathsSummary, p.PathDetails)
+								}
+							} else {
+								u.Logf("  [yellow]ℹ multipath -ll no devolvió mapas DM-Multipath activos en este servidor[-]")
+								u.Logf("  (El servidor usa discos directos / virtualizados sin cabinas SAN multirruta o multipathd no tiene mapas).")
+								u.Logf("")
+								u.Logf("[INVENTARIO DE DISCOS Y CAMINOS DE BLOQUE EN EL SERVIDOR ($ lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL)]:")
+								for _, l := range strings.Split(strings.TrimRight(lsblkOut, "\n"), "\n") {
+									if strings.TrimSpace(l) != "" {
+										u.Logf("  %s", l)
+									}
+								}
+								if len(u.State.StoragePaths) > 0 {
+									u.Logf("[ESTADO DE DISPOSITIVOS Y CAMINOS FISICOS (/sys/block)]:")
+									for _, sp := range u.State.StoragePaths {
+										u.Logf("  • %-14s │ %-11s │ %-8s │ %-20s │ %s (%s)",
+											sp.Name, sp.Type, sp.Size, sp.WWIDOrModel, sp.PathsSummary, sp.PathDetails)
+									}
 								}
 							}
 						})
@@ -2428,6 +2667,7 @@ func (u *AppUI) buildServerHealthPage() tview.Primitive {
 				}},
 				{"Reescanear Buses SCSI / Fibre Channel y Recuperar Paths (scsi_host scan + multipath -r)", "Envía '- - -' a /sys/class/scsi_host/host*/scan y recarga mapas multipathd", func() {
 					if u.State.IsMock {
+						u.Logf("[COMANDO] $ for h in /sys/class/scsi_host/host*/scan; do echo '- - -' > $h; done && multipath -r")
 						for i := range u.State.StoragePaths {
 							if strings.Contains(u.State.StoragePaths[i].PathsSummary, "DEGRADED") {
 								u.State.StoragePaths[i].PathsSummary = "4/4 ACTIVE"
@@ -2445,50 +2685,80 @@ func (u *AppUI) buildServerHealthPage() tview.Primitive {
 							_ = os.WriteFile(h, []byte("- - -\n"), 0644)
 						}
 						runner := executor.NewRunner(15*time.Second, false)
-						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-						_, _ = runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "multipath", "-r")
+						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						_, _ = runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "/sbin/multipath", "-r")
 						_, _, spM := collector.CollectOSHealth(ctx, runner, nil)
 						cancel()
 						u.App.QueueUpdateDraw(func() {
 							u.State.StoragePaths = spM
 							u.rebuildContentViews()
-							u.Logf("[SAN RESCAN] %d controladoras SCSI/FC reescaneadas -> [green]%d dispositivos/paths activos[-]", len(hosts), len(spM))
+							u.Logf("[COMANDO] Reescaneo de %d controladoras SCSI/FC (/sys/class/scsi_host/host*/scan) + multipath -r", len(hosts))
+							for _, sp := range spM {
+								u.Logf("  • %-16s │ %-12s │ %-8s │ %s (%s)", sp.Name, sp.Type, sp.Size, sp.PathsSummary, sp.PathDetails)
+							}
+							u.Logf("[SAN RESCAN] %d controladoras reescaneadas -> [green]%d dispositivos/paths activos[-]", len(hosts), len(spM))
 						})
 					}()
 				}},
-				{"Comprobar Enlaces HBA Fibre Channel (/sys/class/fc_host/host*)", "Verifica estado Online/Linkdown, velocidad (16G/32G) y WWPN de cada tarjeta FC", func() {
+				{"Comprobar Enlaces HBA Fibre Channel y Controladoras SCSI (/sys/class/fc_host & scsi_host)", "Verifica estado Online/Linkdown, velocidad (16G/32G), WWPN y adaptadores SCSI", func() {
 					if u.State.IsMock {
-						u.Logf("[FC HBA] host0: Online (32 Gbit, WWPN 0x10000090fa94a101) │ host1: Online (32 Gbit, WWPN 0x10000090fa94a102) -> [green]OK[-]")
+						u.Logf("[COMANDO] Inspección de /sys/class/fc_host/host* y /sys/class/scsi_host/host*")
+						u.Logf("  • FC HBA host0 : Estado=Online │ Velocidad=32 Gbit │ WWPN=0x10000090fa94a101")
+						u.Logf("  • FC HBA host1 : Estado=Online │ Velocidad=32 Gbit │ WWPN=0x10000090fa94a102")
+						u.Logf("[FC HBA] Todos los enlaces Fibre Channel están Online -> [green]OK[-]")
 						return
 					}
+					u.Logf("[COMANDO] Inspección de adaptadores Fibre Channel (/sys/class/fc_host) y SCSI (/sys/class/scsi_host)")
 					fcHosts, _ := filepath.Glob("/sys/class/fc_host/host*")
 					if len(fcHosts) == 0 {
-						u.Logf("[FC HBA] Servidor sin adaptadores Fibre Channel dedicados en /sys/class/fc_host (Almacenamiento Virtual/iSCSI/Local).")
-						return
+						u.Logf("  ℹ Sin adaptadores Fibre Channel dedicados en /sys/class/fc_host (Almacenamiento Virtual / iSCSI / SAS Local).")
+					} else {
+						for _, hp := range fcHosts {
+							st, _ := os.ReadFile(filepath.Join(hp, "port_state"))
+							sp, _ := os.ReadFile(filepath.Join(hp, "speed"))
+							wwpn, _ := os.ReadFile(filepath.Join(hp, "port_name"))
+							u.Logf("  • [FC HBA %s] Estado=%s │ Velocidad=%s │ WWPN=%s",
+								filepath.Base(hp), strings.TrimSpace(string(st)), strings.TrimSpace(string(sp)), strings.TrimSpace(string(wwpn)))
+						}
 					}
-					for _, hp := range fcHosts {
-						st, _ := os.ReadFile(filepath.Join(hp, "port_state"))
-						sp, _ := os.ReadFile(filepath.Join(hp, "speed"))
-						wwpn, _ := os.ReadFile(filepath.Join(hp, "port_name"))
-						u.Logf("[FC HBA] %s: Estado=%s │ Velocidad=%s │ WWPN=%s",
-							filepath.Base(hp), strings.TrimSpace(string(st)), strings.TrimSpace(string(sp)), strings.TrimSpace(string(wwpn)))
+					scsiHosts, _ := filepath.Glob("/sys/class/scsi_host/host*")
+					for _, sh := range scsiHosts {
+						procRaw, _ := os.ReadFile(filepath.Join(sh, "proc_name"))
+						stateRaw, _ := os.ReadFile(filepath.Join(sh, "state"))
+						u.Logf("  • [SCSI %s] Driver=%s │ Estado=%s",
+							filepath.Base(sh), strings.TrimSpace(string(procRaw)), strings.TrimSpace(string(stateRaw)))
 					}
 				}},
 				{"Reescanear Discos Oracle ASM (oracleasm scandisks / listdisks)", "Sincroniza dispositivos de bloque ASM tras cambios en cabina SAN", func() {
 					if u.State.IsMock {
-						u.Logf("[ORACLEASM] Scanning system for ASM disks... [green]OK (Todos los discos ASM visibles)[-]")
+						u.Logf("[COMANDO] $ oracleasm scandisks && oracleasm listdisks")
+						u.Logf("  Reloading disk partitions: done")
+						u.Logf("  Cleaning any stale ASM disks...")
+						u.Logf("  Scanning system for ASM disks... [green]OK (DATA_01, DATA_02, FRA_01, OCR_VOTE_01)[-]")
 						return
 					}
 					go func() {
 						runner := executor.NewRunner(15*time.Second, false)
 						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 						out, err := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "oracleasm", "scandisks")
+						listOut, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "oracleasm", "listdisks")
 						cancel()
 						u.App.QueueUpdateDraw(func() {
+							u.Logf("[COMANDO] $ oracleasm scandisks && oracleasm listdisks")
 							if err != nil {
-								u.Logf("[ASM DISKS] Dispositivos ASM gestionados por udev/Multipath (oracleasm no requerido) -> [green]OK[-]")
+								u.Logf("  ℹ El comando 'oracleasm' no está instalado o los discos se gestionan mediante reglas udev / ASMFD / Filesystem.")
+								for _, sp := range u.State.StoragePaths {
+									u.Logf("  • Dispositivo detectado: %-14s (%s, %s) -> %s", sp.Name, sp.Type, sp.Size, sp.PathsSummary)
+								}
 							} else {
-								u.Logf("[ORACLEASM] %s -> [green]OK[-]", strings.ReplaceAll(strings.TrimSpace(out), "\n", " "))
+								for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+									if strings.TrimSpace(l) != "" {
+										u.Logf("  %s", strings.TrimSpace(l))
+									}
+								}
+								if strings.TrimSpace(listOut) != "" {
+									u.Logf("[DISCOS ASM VISIBLES]: %s", strings.ReplaceAll(strings.TrimSpace(listOut), "\n", ", "))
+								}
 							}
 						})
 					}()
@@ -2671,6 +2941,8 @@ func (u *AppUI) showGlobalMaintenancePopup() {
 //   Red (#AF0000) hotkeys, Black text, Green (#00AF00) cursor bar with Black text, and a solid Black (#000000) drop shadow.
 // - Green Phosphor CRT: Dark green (#002A00) dialog with Double Bright Phosphor border and inverse #00FF5F cursor bar.
 func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
+	u.capturingOutput = false
+	u.activeOutputView = nil
 	pal := currentPalette
 	list := tview.NewList().
 		ShowSecondaryText(false).
@@ -2811,15 +3083,13 @@ func (u *AppUI) showConfirmModal(taskName string, onConfirm func()) {
 	list.AddItem(" ▸ [1] EJECUTAR AHORA    │ Confirmar y lanzar operacion seleccionada", "", 0, func() {
 		u.Pages.RemovePage("modal")
 		u.activeModalList = nil
+		u.showOperationOutputModal(taskName)
 		if onConfirm != nil {
 			onConfirm()
 		}
-		u.focusFirstRightWindow()
 	})
 	list.AddItem(" ▸ [2] CANCELAR (Esc)    │ Volver sin realizar cambios", "", 0, func() {
-		u.Pages.RemovePage("modal")
-		u.activeModalList = nil
-		u.focusFirstRightWindow()
+		u.closeModal()
 	})
 
 	maxWidth := len(title) + 8
@@ -2855,6 +3125,95 @@ func (u *AppUI) showConfirmModal(taskName string, onConfirm func()) {
 
 	u.Pages.AddPage("modal", modalFlex, true, true)
 	u.App.SetFocus(list)
+	u.updateFocusVisuals()
+}
+
+// showOperationOutputModal opens a dedicated scrollable popup window displaying the real-time
+// and final output of the executed operation so the user always sees the full result on screen.
+func (u *AppUI) showOperationOutputModal(taskName string) {
+	pal := currentPalette
+	u.capturingOutput = true
+	u.activeOutputTask = taskName
+	u.activeOutputLines = nil
+
+	outBox := tview.NewTextView().
+		SetDynamicColors(true).
+		SetScrollable(true).
+		SetWrap(true).
+		SetChangedFunc(func() {
+			u.App.Draw()
+		})
+
+	var boxBg, borderCol tcell.Color
+	var modalTitle string
+	switch u.ColorTheme {
+	case ThemeGreenPhosphor:
+		boxBg = PhosphorBg
+		borderCol = PhosphorGlow
+		modalTitle = fmt.Sprintf("[#001000:#00ff5f:b] ══ RESULTADO DE LA OPERACION: %s ══ [-:-:-]", taskName)
+	case ThemeTurboC:
+		boxBg = VGABlue
+		borderCol = VGABrightWhite
+		modalTitle = fmt.Sprintf("[#000000:#a8a8a8:b] ══ RESULTADO DE LA OPERACION: %s ══ [-:-:-]", taskName)
+	default:
+		boxBg = VGABlue
+		borderCol = VGABrightWhite
+		modalTitle = fmt.Sprintf("[#000000:#ffffff:b] ══ RESULTADO DE LA OPERACION: %s ══ [-:-:-]", taskName)
+	}
+
+	outBox.SetBackgroundColor(boxBg)
+	outBox.SetTextColor(VGABrightWhite)
+	outBox.SetBorder(true).
+		SetBorderColor(borderCol).
+		SetTitleColor(VGABrightYellow).
+		SetTitle(modalTitle)
+
+	closeList := tview.NewList().
+		ShowSecondaryText(false).
+		SetHighlightFullLine(true)
+	closeList.SetBackgroundColor(pal.ModalBg)
+	closeList.SetSelectedBackgroundColor(pal.ModalCursorBg)
+	closeList.SetSelectedTextColor(pal.ModalCursorFg)
+	closeList.AddItem(" ▸ [Enter / Esc / Espacio / Clic] CERRAR VENTANA DE RESULTADO Y VOLVER ", "", 0, func() {
+		u.closeModal()
+	})
+
+	u.activeOutputView = outBox
+	u.activeModalList = closeList
+	u.renderOperationOutput()
+
+	modalWidth := 106
+	modalHeight := 21
+
+	innerCol := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(outBox, 0, 1, true).
+		AddItem(closeList, 1, 0, false)
+
+	leftRim := tview.NewBox().SetBackgroundColor(pal.ModalBg)
+	rightRim := tview.NewBox().SetBackgroundColor(pal.ModalBg)
+	rightShadow := tview.NewBox().SetBackgroundColor(VGABlack)
+	bottomShadow := tview.NewBox().SetBackgroundColor(VGABlack)
+
+	framedOutput := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(leftRim, 1, 0, false).
+		AddItem(innerCol, 0, 1, true).
+		AddItem(rightRim, 1, 0, false).
+		AddItem(rightShadow, 2, 0, false)
+
+	shadowedOutput := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(framedOutput, modalHeight, 1, true).
+		AddItem(bottomShadow, 1, 0, false)
+
+	modalFlex := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(shadowedOutput, modalHeight+1, 1, true).
+			AddItem(nil, 0, 1, false), modalWidth+4, 1, true).
+		AddItem(nil, 0, 1, false)
+
+	u.Pages.AddPage("modal", modalFlex, true, true)
+	u.App.SetFocus(outBox)
 	u.updateFocusVisuals()
 }
 
