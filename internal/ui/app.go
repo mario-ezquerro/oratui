@@ -31,6 +31,8 @@ type AppUI struct {
 	activeModalList *tview.List
 	viewFocusables  map[string][]tview.Primitive
 	tableActions    map[*tview.Table]func(row, col int)
+	rawTitles       map[tview.Primitive]string
+	logHistory      []string
 }
 
 type navEntry struct {
@@ -56,6 +58,7 @@ func NewAppUI(state *model.EnvironmentState) *AppUI {
 		ColorTheme:     ThemeNorton,
 		viewFocusables: make(map[string][]tview.Primitive),
 		tableActions:   make(map[*tview.Table]func(row, col int)),
+		rawTitles:      make(map[tview.Primitive]string),
 	}
 
 	ui.buildLayout()
@@ -96,7 +99,37 @@ func (u *AppUI) activeViewNavIndex() int {
 	return 0
 }
 
-// updateFocusVisuals applies the active color palette (Norton Commander / Turbo C / Dark),
+// decorateTitle formats a window's border title according to the active theme and focus state:
+// - Norton Commander: Teal (#00A8A8) title badge with Black text when focused; Bright Cyan (#55FFFF) when unfocused.
+// - Borland Turbo C++ 3.0: Bright White title with Green [■] close box and [↑] zoom arrow when focused.
+// - Green Phosphor CRT: Inverse Bright Green (#33FF33) badge with dark #001000 text when focused.
+func (u *AppUI) decorateTitle(raw string, hasFocus bool) string {
+	raw = strings.TrimSpace(raw)
+	switch u.ColorTheme {
+	case ThemeNorton:
+		if hasFocus {
+			return fmt.Sprintf("[#000000:#00a8a8:b] %s [-:-:-]", raw)
+		}
+		return fmt.Sprintf("[#55ffff] %s [-]", raw)
+	case ThemeTurboC:
+		if hasFocus {
+			return fmt.Sprintf("[#ffffff][[#55ff55::b]■[#ffffff]] %s [[#55ff55::b]↑[#ffffff]][-]", raw)
+		}
+		return fmt.Sprintf("[#55ffff] %s [-]", raw)
+	case ThemeGreenPhosphor:
+		if hasFocus {
+			return fmt.Sprintf("[#001000:#33ff33:b] %s [-:-:-]", raw)
+		}
+		return fmt.Sprintf("[#00a800] %s [-]", raw)
+	default:
+		if hasFocus {
+			return fmt.Sprintf("[#55ffff::b] %s [-::-]", raw)
+		}
+		return fmt.Sprintf(" %s ", raw)
+	}
+}
+
+// updateFocusVisuals applies the active color palette (Norton Commander / Borland Turbo C / Green Phosphor / Dark),
 // highlights the currently focused/hovered window and row in high-contrast colors,
 // and dims unfocused windows so the user always knows which menu or table option the mouse is over.
 func (u *AppUI) updateFocusVisuals() {
@@ -107,15 +140,62 @@ func (u *AppUI) updateFocusVisuals() {
 	currFocus := u.App.GetFocus()
 	hasModal := u.Pages != nil && u.Pages.HasPage("modal")
 
+	// In Mixed Unicode border mode:
+	// - Borland Turbo C dropdown submenus use a Single Black border (┌─┐│└┘) just like Turbo C++ 3.0,
+	//   while focused editor/table windows and Norton Commander dialogs use Double borders (╔═╗║╚╝).
+	if u.State.BorderMode == model.BorderMixedUnicode {
+		if hasModal && u.ColorTheme == ThemeTurboC {
+			tview.Borders.HorizontalFocus = '─'
+			tview.Borders.VerticalFocus = '│'
+			tview.Borders.TopLeftFocus = '┌'
+			tview.Borders.TopRightFocus = '┐'
+			tview.Borders.BottomLeftFocus = '└'
+			tview.Borders.BottomRightFocus = '┘'
+		} else {
+			tview.Borders.HorizontalFocus = '═'
+			tview.Borders.VerticalFocus = '║'
+			tview.Borders.TopLeftFocus = '╔'
+			tview.Borders.TopRightFocus = '╗'
+			tview.Borders.BottomLeftFocus = '╚'
+			tview.Borders.BottomRightFocus = '╝'
+		}
+	}
+
 	if u.Header != nil {
 		u.Header.SetBackgroundColor(pal.HeaderBg)
-		u.Header.SetBorderColor(pal.ActiveBorder)
-		u.Header.SetTitleColor(pal.ActiveTitle)
+		switch u.ColorTheme {
+		case ThemeTurboC:
+			u.Header.SetBorderColor(VGABlack)
+			u.Header.SetTitleColor(VGABlack)
+			u.Header.SetTitle("[#000000:#a8a8a8:b] [[#a80000::b]≡[#000000]] BORLAND TURBO ORA-TUI 3.0 :: ORACLE CLUSTER & DB MANAGER [-:-:-]")
+		case ThemeNorton:
+			u.Header.SetBorderColor(VGABrightCyan)
+			u.Header.SetTitleColor(VGABrightYellow)
+			u.Header.SetTitle("[#000000:#00a8a8:b] NORTON COMMANDER ORA-TUI :: ORACLE CLUSTER & DB MANAGER [-:-:-]")
+		case ThemeGreenPhosphor:
+			u.Header.SetBorderColor(PhosphorGlow)
+			u.Header.SetTitleColor(PhosphorGlow)
+			u.Header.SetTitle("[#001000:#33ff33:b] IBM 5151 P1 PHOSPHOR CRT :: ORA-TUI ORACLE MANAGER [-:-:-]")
+		default:
+			u.Header.SetBorderColor(pal.ActiveBorder)
+			u.Header.SetTitleColor(pal.ActiveTitle)
+			u.Header.SetTitle(" ══ ORA-TUI :: ORACLE CLUSTER & DATABASE MANAGER ══ ")
+		}
 	}
 	if u.LogView != nil {
 		u.LogView.SetBackgroundColor(pal.LogBg)
-		u.LogView.SetBorderColor(pal.InactiveBorder)
-		u.LogView.SetTitleColor(pal.InactiveTitle)
+		u.LogView.SetBorderColor(pal.LogBorder)
+		u.LogView.SetTitleColor(pal.LogFg)
+		switch u.ColorTheme {
+		case ThemeTurboC:
+			u.LogView.SetTitle("[#0000a8:#00a8a8:b] [[#ffffff::b]■[#0000a8]] Project: CONSOLA DE EJECUCION & AUDITORIA EN VIVO [-:-:-]")
+		case ThemeNorton:
+			u.LogView.SetTitle("[#000000:#00a8a8:b] MS-DOS C:\\ORACLE> CONSOLA DE EJECUCION & AUDITORIA [-:-:-]")
+		case ThemeGreenPhosphor:
+			u.LogView.SetTitle("[#00a800] [CONSOLA DE EJECUCION & AUDITORIA EN VIVO] [-]")
+		default:
+			u.LogView.SetTitle(" CONSOLA DE EJECUCION & AUDITORIA EN VIVO ")
+		}
 	}
 	if u.Footer != nil {
 		u.Footer.SetBackgroundColor(pal.FooterBg)
@@ -124,15 +204,35 @@ func (u *AppUI) updateFocusVisuals() {
 	u.NavList.SetBackgroundColor(pal.NavBg)
 	u.NavList.SetMainTextStyle(tcell.StyleDefault.Background(pal.NavBg).Foreground(pal.NavFg))
 
+	navRaw := u.rawTitles[u.NavList]
+	if navRaw == "" {
+		navRaw = strings.TrimSpace(u.NavList.GetTitle())
+		u.rawTitles[u.NavList] = navRaw
+	}
+
 	navFocused := !hasModal && (currFocus == nil || currFocus == u.NavList)
-	if navFocused {
+	if u.ColorTheme == ThemeTurboC {
+		u.NavList.SetBorderColor(VGABlack)
+		u.NavList.SetTitleColor(VGABlack)
+		if navFocused {
+			u.NavList.SetTitle(fmt.Sprintf("[#000000:#00a800:b] ≡ %s [-:-:-]", navRaw))
+			u.NavList.SetSelectedBackgroundColor(pal.CursorBg)
+			u.NavList.SetSelectedTextColor(pal.CursorFg)
+		} else {
+			u.NavList.SetTitle(fmt.Sprintf("[#000000:#a8a8a8:b] [[#a80000::b]≡[#000000]] %s [-:-:-]", navRaw))
+			u.NavList.SetSelectedBackgroundColor(pal.NavUnfocusedBg)
+			u.NavList.SetSelectedTextColor(pal.NavUnfocusedFg)
+		}
+	} else if navFocused {
 		u.NavList.SetBorderColor(pal.ActiveBorder)
 		u.NavList.SetTitleColor(pal.ActiveTitle)
+		u.NavList.SetTitle(u.decorateTitle(navRaw, true))
 		u.NavList.SetSelectedBackgroundColor(pal.CursorBg)
 		u.NavList.SetSelectedTextColor(pal.CursorFg)
 	} else {
 		u.NavList.SetBorderColor(pal.InactiveBorder)
 		u.NavList.SetTitleColor(pal.InactiveTitle)
+		u.NavList.SetTitle(u.decorateTitle(navRaw, false))
 		u.NavList.SetSelectedBackgroundColor(pal.NavUnfocusedBg)
 		u.NavList.SetSelectedTextColor(pal.NavUnfocusedFg)
 	}
@@ -141,7 +241,13 @@ func (u *AppUI) updateFocusVisuals() {
 		hasFocus := !hasModal && currFocus == p
 		switch w := p.(type) {
 		case *tview.Table:
+			raw := u.rawTitles[w]
+			if raw == "" {
+				raw = strings.TrimSpace(w.GetTitle())
+				u.rawTitles[w] = raw
+			}
 			w.SetBackgroundColor(pal.PanelBg)
+			w.SetTitle(u.decorateTitle(raw, hasFocus))
 			if hasFocus {
 				w.SetBorderColor(pal.ActiveBorder)
 				w.SetTitleColor(pal.ActiveTitle)
@@ -153,8 +259,14 @@ func (u *AppUI) updateFocusVisuals() {
 				w.SetSelectable(false, false)
 			}
 		case *tview.List:
+			raw := u.rawTitles[w]
+			if raw == "" {
+				raw = strings.TrimSpace(w.GetTitle())
+				u.rawTitles[w] = raw
+			}
 			w.SetBackgroundColor(pal.PanelBg)
 			w.SetMainTextStyle(tcell.StyleDefault.Background(pal.PanelBg).Foreground(pal.PanelFg))
+			w.SetTitle(u.decorateTitle(raw, hasFocus))
 			if hasFocus {
 				w.SetBorderColor(pal.ActiveBorder)
 				w.SetTitleColor(pal.ActiveTitle)
@@ -167,7 +279,13 @@ func (u *AppUI) updateFocusVisuals() {
 				w.SetSelectedTextColor(pal.NavUnfocusedFg)
 			}
 		case *tview.TextView:
+			raw := u.rawTitles[w]
+			if raw == "" {
+				raw = strings.TrimSpace(w.GetTitle())
+				u.rawTitles[w] = raw
+			}
 			w.SetBackgroundColor(pal.PanelBg)
+			w.SetTitle(u.decorateTitle(raw, hasFocus))
 			if hasFocus {
 				w.SetBorderColor(pal.ActiveBorder)
 				w.SetTitleColor(pal.ActiveTitle)
@@ -189,7 +307,54 @@ func (u *AppUI) winTitle(base, hint string) string {
 func (u *AppUI) Logf(format string, args ...interface{}) {
 	ts := time.Now().Format("15:04:05")
 	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(u.LogView, "[aqua][%s][-] %s\n", ts, msg)
+	entry := fmt.Sprintf("[%s] %s", ts, msg)
+	u.logHistory = append(u.logHistory, entry)
+	if len(u.logHistory) > 80 {
+		u.logHistory = u.logHistory[len(u.logHistory)-80:]
+	}
+	u.renderLogs()
+}
+
+func (u *AppUI) renderLogs() {
+	if u.LogView == nil {
+		return
+	}
+	var sb strings.Builder
+	for _, entry := range u.logHistory {
+		line := entry
+		switch u.ColorTheme {
+		case ThemeTurboC:
+			// Borland Turbo C bottom Cyan (#00A8A8) Project window uses Dark Blue (#0000A8), Black (#000000), and Red (#A80000)
+			r := strings.NewReplacer(
+				"[yellow::b]", "[#000000::b]",
+				"[yellow]", "[#000000::b]",
+				"[lime::b]", "[#0000a8::b]",
+				"[green]", "[#0000a8::b]",
+				"[aqua]", "[#0000a8::b]",
+				"[red]", "[#a80000::b]",
+			)
+			line = r.Replace(line)
+			sb.WriteString(" [#0000a8]• " + line + "[-]\n")
+		case ThemeGreenPhosphor:
+			// IBM 5151 Monochrome P1 Green Phosphor
+			r := strings.NewReplacer(
+				"[yellow::b]", "[#99ff99::b]",
+				"[yellow]", "[#99ff99::b]",
+				"[lime::b]", "[#33ff33::b]",
+				"[green]", "[#33ff33::b]",
+				"[aqua]", "[#33ff33]",
+				"[red]", "[#001000:#33ff33:b]",
+			)
+			line = r.Replace(line)
+			sb.WriteString(" [#00a800]>[#33ff33] " + line + "[-]\n")
+		case ThemeNorton:
+			// Norton Commander bottom MS-DOS prompt style
+			sb.WriteString(" [#a8a8a8]C:\\>[-] [#55ffff]" + line + "[-]\n")
+		default:
+			sb.WriteString(" [#55ffff]" + line + "[-]\n")
+		}
+	}
+	u.LogView.SetText(sb.String())
 	u.LogView.ScrollToEnd()
 }
 
@@ -197,9 +362,9 @@ func (u *AppUI) Logf(format string, args ...interface{}) {
 // always has at least 1 selectable data row (row 1) so tview never traps focus on an empty table.
 func ensureSelectableRow(tbl *tview.Table, colCount int, emptyMsg string) {
 	if tbl.GetRowCount() <= 1 {
-		tbl.SetCell(1, 0, tview.NewTableCell("[#d0d0d0]"+emptyMsg+"[-]").SetSelectable(true))
+		tbl.SetCell(1, 0, MutedCell(emptyMsg))
 		for c := 1; c < colCount; c++ {
-			tbl.SetCell(1, c, tview.NewTableCell("[#d0d0d0]-[-]").SetSelectable(true))
+			tbl.SetCell(1, c, MutedCell("-"))
 		}
 	}
 	tbl.Select(1, 0)
@@ -216,7 +381,7 @@ func (u *AppUI) navEntries() []navEntry {
 		{"alert_log", "7. Alert Log & Errores", "ORA- & ADRCI Purge", func() { u.switchViewAndFocus("alert_log") }},
 		{"maintenance", "8. Centro Mantenimiento", "Asistentes Guiados", func() { u.switchViewAndFocus("maintenance") }},
 		{"", "F1. Ayuda en Menus", "Ocultar/Ver Ayuda", func() { u.toggleMenuHelp() }},
-		{"", "c. Tema Norton/TurboC", "Azul NC / Turbo C", func() { u.cycleColorTheme() }},
+		{"", "c. Tema Color Retro", "NC / TurboC / Fosforo", func() { u.cycleColorTheme() }},
 		{"", "b. Cambiar Marcos", "Simple ┌─┐ / ╔═╗", func() { u.cycleBorderMode() }},
 		{"", "q. Salir (Ctrl+C)", "Cerrar programa", func() { u.App.Stop() }},
 	}
@@ -226,13 +391,43 @@ func (u *AppUI) populateNavList() {
 	currIdx := u.NavList.GetCurrentItem()
 	u.NavList.Clear()
 	u.NavList.ShowSecondaryText(false)
-	u.NavList.SetTitle(u.winTitle("MENU", "Clic / ↑↓ / →"))
+	rawTitle := strings.TrimSpace(u.winTitle("MENU", "Clic / ↑↓ / →"))
+	if u.rawTitles == nil {
+		u.rawTitles = make(map[tview.Primitive]string)
+	}
+	u.rawTitles[u.NavList] = rawTitle
+	u.NavList.SetTitle(rawTitle)
 
 	entries := u.navEntries()
 	for _, e := range entries {
-		label := " " + e.short
-		if u.ShowMenuHelp {
-			label = fmt.Sprintf(" %-24s │ %s", e.short, e.help)
+		parts := strings.SplitN(e.short, ". ", 2)
+		keyPart := parts[0] + "."
+		restPart := ""
+		if len(parts) > 1 {
+			restPart = parts[1]
+		}
+		var label string
+		switch u.ColorTheme {
+		case ThemeTurboC:
+			// Borland Turbo C++ 3.0: Red (#A80000) shortcut key + Black (#000000) item label
+			if u.ShowMenuHelp {
+				label = fmt.Sprintf(" [#a80000::b]%-3s[-::-] %-20s │ %s", keyPart, restPart, e.help)
+			} else {
+				label = fmt.Sprintf(" [#a80000::b]%-3s[-::-] %s", keyPart, restPart)
+			}
+		case ThemeNorton:
+			// Norton Commander: Bright Yellow (#FFFF55) shortcut key + Cyan/Black item label
+			if u.ShowMenuHelp {
+				label = fmt.Sprintf(" [#ffff55::b]%-3s[-::-] %-20s │ %s", keyPart, restPart, e.help)
+			} else {
+				label = fmt.Sprintf(" [#ffff55::b]%-3s[-::-] %s", keyPart, restPart)
+			}
+		default:
+			// Green Phosphor CRT & Dark: Pure uniform text so hardware-style inverse bar inverts 100% of the line
+			label = " " + e.short
+			if u.ShowMenuHelp {
+				label = fmt.Sprintf(" %-24s │ %s", e.short, e.help)
+			}
 		}
 		u.NavList.AddItem(label, "", 0, e.fn)
 	}
@@ -253,7 +448,7 @@ func (u *AppUI) buildLayout() {
 	u.Header = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft)
-	u.Header.SetBorder(true).SetTitle(" ══ ORA-TUI :: ORACLE CLUSTER & DATABASE MANAGER ══ ")
+	u.Header.SetBorder(true)
 	u.refreshHeader()
 
 	// 2. Left Arrow-Key Navigation Menu (Single-line items so all 12 options always fit without scrolling)
@@ -289,7 +484,7 @@ func (u *AppUI) buildLayout() {
 		SetChangedFunc(func() {
 			u.App.Draw()
 		})
-	u.LogView.SetBorder(true).SetTitle(" CONSOLA DE EJECUCION & AUDITORIA EN VIVO ")
+	u.LogView.SetBorder(true)
 
 	// 5. Footer Keybindings Bar
 	u.Footer = tview.NewTextView().
@@ -654,10 +849,31 @@ func (u *AppUI) refreshFooter() {
 	if !u.ShowMenuHelp {
 		helpState = "OFF"
 	}
-	u.Footer.SetText(fmt.Sprintf(
-		" [black:aqua] Raton/Hover [-:-] Marcar │ [black:aqua] Click/Enter [-:-] Submenu │ [black:aqua] F1 [-:-] Ayuda:%s │ [black:aqua] c [-:-] Tema:%s │ [black:aqua] b [-:-] Marcos │ [black:aqua] q [-:-] Salir ",
-		helpState, u.ColorTheme,
-	))
+	switch u.ColorTheme {
+	case ThemeNorton:
+		// Classic Norton Commander bottom bar: White number on Black + Black label on Teal (#00A8A8)
+		u.Footer.SetText(fmt.Sprintf(
+			"[#ffffff:#000000:b]1[#000000:#00a8a8]Cluster[-:-] [#ffffff:#000000:b]2[#000000:#00a8a8]Users [-:-] [#ffffff:#000000:b]3[#000000:#00a8a8]Tbsp  [-:-] [#ffffff:#000000:b]4[#000000:#00a8a8]Tablas[-:-] [#ffffff:#000000:b]5[#000000:#00a8a8]ASM/Red[-:-] [#ffffff:#000000:b]6[#000000:#00a8a8]RMAN  [-:-] [#ffffff:#000000:b]7[#000000:#00a8a8]Alert [-:-] [#ffffff:#000000:b]8[#000000:#00a8a8]Maint [-:-] [#ffffff:#000000:b]F1[#000000:#00a8a8]Ayuda:%s[-:-] [#ffffff:#000000:b]c[#000000:#00a8a8]Tema[-:-] [#ffffff:#000000:b]b[#000000:#00a8a8]Marco[-:-] [#ffffff:#000000:b]10/q[#000000:#00a8a8]Quit [-:-]",
+			helpState,
+		))
+	case ThemeTurboC:
+		// Classic Borland Turbo C++ 3.0 bottom bar: Silver (#A8A8A8) background, Red (#A80000) hotkeys, Black (#000000) labels
+		u.Footer.SetText(fmt.Sprintf(
+			" [#a80000::b]F1[-::-] [#000000]Help:%s  [#a80000::b]Raton/Hover[-::-] [#000000]Marcar  [#a80000::b]Click/Enter[-::-] [#000000]Submenu  [#a80000::b]c[-::-] [#000000]Tema:%s  [#a80000::b]b[-::-] [#000000]Marcos  [#a80000::b]Alt-X/q[-::-] [#000000]Quit[-]",
+			helpState, u.ColorTheme,
+		))
+	case ThemeGreenPhosphor:
+		// Classic IBM 5151 P1 Green Phosphor inverse key bar
+		u.Footer.SetText(fmt.Sprintf(
+			" [#001000:#33ff33:b] Raton/Hover [-:-:-] [#33ff33]Marcar │ [-][#001000:#33ff33:b] Click/Enter [-:-:-] [#33ff33]Submenu │ [-][#001000:#33ff33:b] F1 [-:-:-] [#33ff33]Ayuda:%s │ [-][#001000:#33ff33:b] c [-:-:-] [#33ff33]Tema:%s │ [-][#001000:#33ff33:b] b [-:-:-] [#33ff33]Marcos │ [-][#001000:#33ff33:b] q [-:-:-] [#33ff33]Salir[-]",
+			helpState, u.ColorTheme,
+		))
+	default:
+		u.Footer.SetText(fmt.Sprintf(
+			" [black:aqua] Raton/Hover [-:-] Marcar │ [black:aqua] Click/Enter [-:-] Submenu │ [black:aqua] F1 [-:-] Ayuda:%s │ [black:aqua] c [-:-] Tema:%s │ [black:aqua] b [-:-] Marcos │ [black:aqua] q [-:-] Salir ",
+			helpState, u.ColorTheme,
+		))
+	}
 }
 
 func (u *AppUI) cycleColorTheme() {
@@ -666,8 +882,9 @@ func (u *AppUI) cycleColorTheme() {
 	u.populateNavList()
 	u.refreshHeader()
 	u.refreshFooter()
+	u.renderLogs()
 	u.rebuildContentViews()
-	u.Logf("Tema de color cambiado a: [yellow::b]%s[-::-] (Pulse [yellow]c[-] para alternar Norton Commander / Turbo C / Oscuro)", u.ColorTheme)
+	u.Logf("Tema de color cambiado a: [yellow::b]%s[-::-] (Pulse [yellow]c[-] para alternar Norton Commander / Turbo C / Fosforo Verde / Oscuro)", u.ColorTheme)
 }
 
 func (u *AppUI) cycleBorderMode() {
@@ -679,10 +896,6 @@ func (u *AppUI) cycleBorderMode() {
 }
 
 func (u *AppUI) refreshHeader() {
-	modeBadge := "[black:lime] " + string(u.State.Topology) + " [-:-]"
-	if u.State.IsMock {
-		modeBadge += " [black:yellow] MOCK [-:-]"
-	}
 	activeSessions := 0
 	blockers := 0
 	for _, s := range u.State.Sessions {
@@ -694,13 +907,49 @@ func (u *AppUI) refreshHeader() {
 		}
 	}
 	critAlerts := len(u.State.AlertEntries)
-	text := fmt.Sprintf(
-		" Modo: %s │ Host: [white::b]%s[-::-] │ Cluster: [yellow::b]%s[-::-] │ Ver: [lime::b]%s[-::-] │ Tema: [yellow::b]%s[-::-]\n"+
-			" HOME: %s (%s) │ [lime::b]%d Inst OPEN[-::-] │ [white::b]%d PDBs[-::-] │ [yellow::b]%d Sesiones[-::-] ([#ff5555::b]%d Locks[-::-]) │ [#ff5555::b]%d Inválidos[-::-] │ [#ff5555::b]%d Errores ORA-[-::-]",
-		modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.ColorTheme,
-		u.State.OracleHome, u.State.OracleOwner,
-		len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
-	)
+
+	var text string
+	switch u.ColorTheme {
+	case ThemeTurboC:
+		// Borland Turbo C++ 3.0 top bar: Silver (#A8A8A8) background with Black (#000000), Dark Blue (#0000A8), Red (#A80000), and Green (#00A800) badge
+		modeBadge := "[#000000:#00a800:b] " + string(u.State.Topology) + " [-:-:-]"
+		if u.State.IsMock {
+			modeBadge += " [#ffffff:#a80000:b] MOCK [-:-:-]"
+		}
+		text = fmt.Sprintf(
+			" [#a80000::b]M[-::-][#000000]odo: %s │ [#a80000::b]H[-::-][#000000]ost: [#0000a8::b]%s[-::-] │ [#a80000::b]C[-::-][#000000]luster: [#0000a8::b]%s[-::-] │ [#a80000::b]V[-::-][#000000]er: [#0000a8::b]%s[-::-] │ [#a80000::b]T[-::-][#000000]ema: [#000000:#00a800:b] %s [-:-:-]\n"+
+				" [#000000]HOME: %s (%s) │ [#0000a8::b]%d Inst OPEN[-::-] │ [#0000a8::b]%d PDBs[-::-] │ [#000000::b]%d Sesiones[-::-] ([#a80000::b]%d Locks[-::-]) │ [#a80000::b]%d Inválidos[-::-] │ [#a80000::b]%d Errores ORA-[-::-]",
+			modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.ColorTheme,
+			u.State.OracleHome, u.State.OracleOwner,
+			len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
+		)
+	case ThemeGreenPhosphor:
+		// IBM 5151 Monochrome P1 Green Phosphor CRT
+		modeBadge := "[#001000:#33ff33:b] " + string(u.State.Topology) + " [-:-:-]"
+		if u.State.IsMock {
+			modeBadge += " [#001000:#99ff99:b] MOCK [-:-:-]"
+		}
+		text = fmt.Sprintf(
+			" [#00a800]Modo:[-] %s │ [#00a800]Host:[-] [#99ff99::b]%s[-::-] │ [#00a800]Cluster:[-] [#33ff33::b]%s[-::-] │ [#00a800]Ver:[-] [#33ff33::b]%s[-::-] │ [#00a800]Tema:[-] [#99ff99::b]%s[-::-]\n"+
+				" [#00a800]HOME:[-] [#33ff33]%s (%s)[-] │ [#99ff99::b]%d Inst OPEN[-::-] │ [#33ff33::b]%d PDBs[-::-] │ [#33ff33::b]%d Sesiones[-::-] ([#001000:#33ff33:b] %d Locks [-:-:-]) │ [#33ff33::b]%d Inválidos[-::-] │ [#001000:#33ff33:b] %d ORA- [-:-:-]",
+			modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.ColorTheme,
+			u.State.OracleHome, u.State.OracleOwner,
+			len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
+		)
+	default:
+		// Norton Commander & Dark
+		modeBadge := "[#000000:#00a8a8:b] " + string(u.State.Topology) + " [-:-:-]"
+		if u.State.IsMock {
+			modeBadge += " [#000000:#ffff55:b] MOCK [-:-:-]"
+		}
+		text = fmt.Sprintf(
+			" Modo: %s │ Host: [#ffffff::b]%s[-::-] │ Cluster: [#ffff55::b]%s[-::-] │ Ver: [#55ff55::b]%s[-::-] │ Tema: [#ffff55::b]%s[-::-]\n"+
+				" HOME: %s (%s) │ [#55ff55::b]%d Inst OPEN[-::-] │ [#ffffff::b]%d PDBs[-::-] │ [#ffff55::b]%d Sesiones[-::-] ([#ff5555::b]%d Locks[-::-]) │ [#ff5555::b]%d Inválidos[-::-] │ [#ff5555::b]%d Errores ORA-[-::-]",
+			modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.ColorTheme,
+			u.State.OracleHome, u.State.OracleOwner,
+			len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
+		)
+	}
 	u.Header.SetText(text)
 }
 
@@ -819,18 +1068,18 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 	nodesTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] NODOS DEL CLUSTER & DAEMONS", "Clic/Enter = Acciones │ ←/→ Ventana"))
 	headers := []string{"NODO", "ESTADO", "ROL", "CRS", "CSSD", "EVMD", "ASM", "VIP", "INTERCONNECT"}
 	for c, h := range headers {
-		nodesTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		nodesTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, n := range u.State.Nodes {
 		r := i + 1
-		nodesTbl.SetCell(r, 0, tview.NewTableCell(n.Name))
-		nodesTbl.SetCell(r, 1, tview.NewTableCell(ColorStatus(n.State)))
+		nodesTbl.SetCell(r, 0, KeyCell(n.Name))
+		nodesTbl.SetCell(r, 1, StatusCell(n.State))
 		nodesTbl.SetCell(r, 2, tview.NewTableCell(n.Role))
-		nodesTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(n.CRS)))
-		nodesTbl.SetCell(r, 4, tview.NewTableCell(ColorStatus(n.CSSD)))
-		nodesTbl.SetCell(r, 5, tview.NewTableCell(ColorStatus(n.EVMD)))
-		nodesTbl.SetCell(r, 6, tview.NewTableCell(ColorStatus(n.ASM)))
-		nodesTbl.SetCell(r, 7, tview.NewTableCell(ColorStatus(n.VIP)))
+		nodesTbl.SetCell(r, 3, StatusCell(n.CRS))
+		nodesTbl.SetCell(r, 4, StatusCell(n.CSSD))
+		nodesTbl.SetCell(r, 5, StatusCell(n.EVMD))
+		nodesTbl.SetCell(r, 6, StatusCell(n.ASM))
+		nodesTbl.SetCell(r, 7, StatusCell(n.VIP))
 		nodesTbl.SetCell(r, 8, tview.NewTableCell(n.Interconnect))
 	}
 	ensureSelectableRow(nodesTbl, len(headers), "Sin nodos de cluster detectados")
@@ -891,19 +1140,19 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 	instTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] INSTANCIAS DE BASE DE DATOS & DATA GUARD", "Clic/Enter = Start/Stop │ ←/→ Ventana"))
 	iHeaders := []string{"INST", "DB_NAME", "NODO", "ESTADO", "OPEN_MODE", "FLASHBACK", "MEMORIA (SGA/PGA)", "FRA_USO", "DG_LAG", "UPTIME"}
 	for c, h := range iHeaders {
-		instTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		instTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, inst := range u.State.Instances {
 		r := i + 1
-		instTbl.SetCell(r, 0, tview.NewTableCell(inst.InstName))
+		instTbl.SetCell(r, 0, KeyCell(inst.InstName))
 		instTbl.SetCell(r, 1, tview.NewTableCell(inst.DBName))
 		instTbl.SetCell(r, 2, tview.NewTableCell(inst.NodeName))
-		instTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(inst.Status)))
-		instTbl.SetCell(r, 4, tview.NewTableCell(ColorStatus(inst.OpenMode)))
-		instTbl.SetCell(r, 5, tview.NewTableCell(ColorStatus(inst.FlashbackOn)))
+		instTbl.SetCell(r, 3, StatusCell(inst.Status))
+		instTbl.SetCell(r, 4, StatusCell(inst.OpenMode))
+		instTbl.SetCell(r, 5, StatusCell(inst.FlashbackOn))
 		instTbl.SetCell(r, 6, tview.NewTableCell(fmt.Sprintf("SGA:%s / PGA:%s", formatMemGB(inst.SGAMB), formatMemGB(inst.PGAMB))))
-		instTbl.SetCell(r, 7, tview.NewTableCell(ASCIIBar(float64(inst.FRAUsedPct), 8, true)))
-		instTbl.SetCell(r, 8, tview.NewTableCell("[green]"+inst.DGLag+"[-]"))
+		instTbl.SetCell(r, 7, BarCell(float64(inst.FRAUsedPct), 8))
+		instTbl.SetCell(r, 8, StatusCell(inst.DGLag))
 		instTbl.SetCell(r, 9, tview.NewTableCell(inst.Uptime))
 	}
 	ensureSelectableRow(instTbl, len(iHeaders), "Sin instancias activas detectadas (Clic o Enter para iniciar)")
@@ -923,13 +1172,13 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 	pdbTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] PLUGGABLE DATABASES - PDBs", "Clic/Enter = Abrir/Cerrar │ ←/→ Ventana"))
 	pHeaders := []string{"CON_ID", "PDB_NAME", "OPEN_MODE", "RESTRICTED", "TAMANO_GB", "INSTANCIAS"}
 	for c, h := range pHeaders {
-		pdbTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		pdbTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, p := range u.State.PDBs {
 		r := i + 1
 		pdbTbl.SetCell(r, 0, tview.NewTableCell(fmt.Sprintf("%d", p.ConID)))
-		pdbTbl.SetCell(r, 1, tview.NewTableCell(p.Name))
-		pdbTbl.SetCell(r, 2, tview.NewTableCell(ColorStatus(p.OpenMode)))
+		pdbTbl.SetCell(r, 1, KeyCell(p.Name))
+		pdbTbl.SetCell(r, 2, StatusCell(p.OpenMode))
 		pdbTbl.SetCell(r, 3, tview.NewTableCell(p.Restricted))
 		pdbTbl.SetCell(r, 4, tview.NewTableCell(fmt.Sprintf("%.1f GB", p.SizeGB)))
 		pdbTbl.SetCell(r, 5, tview.NewTableCell(p.InstName))
@@ -980,21 +1229,21 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 
 	headers := []string{"INST", "SID,SER#", "USUARIO", "ESTADO", "MAQUINA", "PROGRAMA", "SQL_ID", "EVENTO DE ESPERA", "TIEMPO", "BLOQUEO", "PGA_MB"}
 	for c, h := range headers {
-		tbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		tbl.SetCell(0, c, HeaderCell(h))
 	}
 
 	for i, s := range u.State.Sessions {
 		r := i + 1
 		tbl.SetCell(r, 0, tview.NewTableCell(fmt.Sprintf("%d", s.InstID)))
 		tbl.SetCell(r, 1, tview.NewTableCell(fmt.Sprintf("%d,%d", s.SID, s.Serial)))
-		tbl.SetCell(r, 2, tview.NewTableCell("[white::b]"+s.Username))
-		tbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(s.Status)))
+		tbl.SetCell(r, 2, KeyCell(s.Username))
+		tbl.SetCell(r, 3, StatusCell(s.Status))
 		tbl.SetCell(r, 4, tview.NewTableCell(s.Machine))
 		tbl.SetCell(r, 5, tview.NewTableCell(s.Program))
-		tbl.SetCell(r, 6, tview.NewTableCell("[aqua]"+s.SQLID))
+		tbl.SetCell(r, 6, AccentCell(s.SQLID))
 		tbl.SetCell(r, 7, tview.NewTableCell(s.WaitEvent))
 		tbl.SetCell(r, 8, tview.NewTableCell(fmt.Sprintf("%ds", s.ElapsedSec)))
-		tbl.SetCell(r, 9, tview.NewTableCell(ColorStatus(s.BlockingSession)))
+		tbl.SetCell(r, 9, StatusCell(s.BlockingSession))
 		tbl.SetCell(r, 10, tview.NewTableCell(fmt.Sprintf("%.1fM", s.PGAMB)))
 	}
 	ensureSelectableRow(tbl, len(headers), "Sin sesiones de usuario activas")
@@ -1005,19 +1254,25 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 		SetBorderColor(currentPalette.InactiveBorder).
 		SetTitleColor(currentPalette.InactiveTitle).
 		SetTitle(" DETALLE SQL ACTUAL & DIAGNOSTICO DE BLOQUEO ")
+
+	formatSQLPreview := func(s model.UserSession) string {
+		if u.ColorTheme == ThemeGreenPhosphor {
+			return fmt.Sprintf(" [#00a800]Usuario:[-] [#99ff99::b]%s[-::-] (SID %d,%d @ Inst %d) │ [#00a800]Espera:[-] [#33ff33]%s[-] │ [#00a800]Bloqueo:[-] [#33ff33]%s[-]\n [#00a800]SQL Text:[-] [#99ff99]%s[-]",
+				s.Username, s.SID, s.Serial, s.InstID, s.WaitEvent, s.BlockingSession, s.SQLText)
+		}
+		return fmt.Sprintf(" [#ffff55::b]Usuario:[-::-] %s (SID %d,%d @ Inst %d) │ [#ffff55::b]Espera:[-::-] %s │ [#ffff55::b]Bloqueo:[-::-] %s\n [#ffff55::b]SQL Text:[-::-] [#ffffff]%s[-]",
+			s.Username, s.SID, s.Serial, s.InstID, s.WaitEvent, s.BlockingSession, s.SQLText)
+	}
+
 	if len(u.State.Sessions) > 0 {
-		s0 := u.State.Sessions[0]
-		sqlPreview.SetText(fmt.Sprintf(" [yellow]Usuario:[-] %s (SID %d,%d @ Inst %d) │ [yellow]Espera:[-] %s\n [yellow]SQL Text:[-] [white]%s[-]",
-			s0.Username, s0.SID, s0.Serial, s0.InstID, s0.WaitEvent, s0.SQLText))
+		sqlPreview.SetText(formatSQLPreview(u.State.Sessions[0]))
 	} else {
-		sqlPreview.SetText(" [#d0d0d0]Seleccione una sesion para inspeccionar su sentencia SQL y estado de bloqueo.[-]")
+		sqlPreview.SetText(" Seleccione una sesion para inspeccionar su sentencia SQL y estado de bloqueo.")
 	}
 
 	tbl.SetSelectionChangedFunc(func(row, col int) {
 		if row > 0 && row <= len(u.State.Sessions) {
-			s := u.State.Sessions[row-1]
-			sqlPreview.SetText(fmt.Sprintf(" [yellow]Usuario:[-] %s (SID %d,%d @ Inst %d) │ [yellow]Espera:[-] %s │ [yellow]Bloqueo:[-] %s\n [yellow]SQL Text:[-] [white]%s[-]",
-				s.Username, s.SID, s.Serial, s.InstID, s.WaitEvent, s.BlockingSession, s.SQLText))
+			sqlPreview.SetText(formatSQLPreview(u.State.Sessions[row-1]))
 		}
 	})
 
@@ -1075,20 +1330,20 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 
 	headers := []string{"TABLESPACE", "TIPO", "ESTADO", "ASIG_MB", "TOTAL_MAX", "USADO_MB", "LIBRE_MB", "USO REAL %", "AUTOEXT", "FILES"}
 	for c, h := range headers {
-		tbsTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		tbsTbl.SetCell(0, c, HeaderCell(h))
 	}
 
 	for i, ts := range u.State.Tablespaces {
 		r := i + 1
-		tbsTbl.SetCell(r, 0, tview.NewTableCell("[white::b]"+ts.Name))
+		tbsTbl.SetCell(r, 0, KeyCell(ts.Name))
 		tbsTbl.SetCell(r, 1, tview.NewTableCell(ts.Type))
-		tbsTbl.SetCell(r, 2, tview.NewTableCell(ColorStatus(ts.Status)))
+		tbsTbl.SetCell(r, 2, StatusCell(ts.Status))
 		tbsTbl.SetCell(r, 3, tview.NewTableCell(fmt.Sprintf("%d MB", ts.AllocMB)))
 		tbsTbl.SetCell(r, 4, tview.NewTableCell(fmt.Sprintf("%d MB", ts.TotalMB)))
 		tbsTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%d MB", ts.UsedMB)))
 		tbsTbl.SetCell(r, 6, tview.NewTableCell(fmt.Sprintf("%d MB", ts.FreeMB)))
-		tbsTbl.SetCell(r, 7, tview.NewTableCell(ASCIIBar(ts.UsedPct, 12, true)))
-		tbsTbl.SetCell(r, 8, tview.NewTableCell(ColorStatus(ts.AutoExtend)))
+		tbsTbl.SetCell(r, 7, BarCell(ts.UsedPct, 12))
+		tbsTbl.SetCell(r, 8, StatusCell(ts.AutoExtend))
 		tbsTbl.SetCell(r, 9, tview.NewTableCell(fmt.Sprintf("%d", ts.Datafiles)))
 	}
 	ensureSelectableRow(tbsTbl, len(headers), "Sin tablespaces detectados")
@@ -1097,17 +1352,17 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 	dfTbl.SetBorder(true).SetTitle(u.winTitle("[2/2] DATAFILES ASOCIADOS (dba_data_files)", "Clic/Enter = Mantenimiento Datafile │ ←/→ Ventana"))
 	dHeaders := []string{"FILE_ID", "TABLESPACE", "RUTA / ASM FILE", "TAMANO_MB", "MAX_MB", "AUTOEXTEND", "ESTADO"}
 	for c, h := range dHeaders {
-		dfTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		dfTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, df := range u.State.Datafiles {
 		r := i + 1
 		dfTbl.SetCell(r, 0, tview.NewTableCell(fmt.Sprintf("%d", df.FileID)))
-		dfTbl.SetCell(r, 1, tview.NewTableCell(df.Tablespace))
+		dfTbl.SetCell(r, 1, KeyCell(df.Tablespace))
 		dfTbl.SetCell(r, 2, tview.NewTableCell(df.FileName))
 		dfTbl.SetCell(r, 3, tview.NewTableCell(fmt.Sprintf("%d MB", df.SizeMB)))
 		dfTbl.SetCell(r, 4, tview.NewTableCell(fmt.Sprintf("%d MB", df.MaxSizeMB)))
-		dfTbl.SetCell(r, 5, tview.NewTableCell(df.AutoExtend))
-		dfTbl.SetCell(r, 6, tview.NewTableCell(ColorStatus(df.Status)))
+		dfTbl.SetCell(r, 5, StatusCell(df.AutoExtend))
+		dfTbl.SetCell(r, 6, StatusCell(df.Status))
 	}
 	ensureSelectableRow(dfTbl, len(dHeaders), "Sin datafiles detectados")
 
@@ -1203,20 +1458,20 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 
 	headers := []string{"ESQUEMA", "NOMBRE SEGMENTO", "TIPO", "TABLESPACE", "TAMANO_MB", "NUM_FILAS", "ULT_ANALISIS", "ESTADISTICAS", "FRAGMENTACION"}
 	for c, h := range headers {
-		segTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		segTbl.SetCell(0, c, HeaderCell(h))
 	}
 
 	for i, seg := range u.State.TableSegments {
 		r := i + 1
 		segTbl.SetCell(r, 0, tview.NewTableCell(seg.Owner))
-		segTbl.SetCell(r, 1, tview.NewTableCell("[white::b]"+seg.SegmentName))
+		segTbl.SetCell(r, 1, KeyCell(seg.SegmentName))
 		segTbl.SetCell(r, 2, tview.NewTableCell(seg.SegmentType))
 		segTbl.SetCell(r, 3, tview.NewTableCell(seg.Tablespace))
 		segTbl.SetCell(r, 4, tview.NewTableCell(fmt.Sprintf("%d MB", seg.SizeMB)))
 		segTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%d", seg.NumRows)))
 		segTbl.SetCell(r, 6, tview.NewTableCell(seg.LastAnalyzed))
-		segTbl.SetCell(r, 7, tview.NewTableCell(ColorStatus(seg.StatsStatus)))
-		segTbl.SetCell(r, 8, tview.NewTableCell(ColorStatus(seg.Fragmented)))
+		segTbl.SetCell(r, 7, StatusCell(seg.StatsStatus))
+		segTbl.SetCell(r, 8, StatusCell(seg.Fragmented))
 	}
 	ensureSelectableRow(segTbl, len(headers), "Sin segmentos de usuario detectados")
 
@@ -1224,14 +1479,14 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 	invTbl.SetBorder(true).SetTitle(u.winTitle("[2/2] OBJETOS INVALIDOS (dba_objects)", "Clic/Enter = Recompilar │ ←/→ Ventana"))
 	iHeaders := []string{"ESQUEMA", "OBJETO", "TIPO", "ESTADO", "ULTIMO_DDL"}
 	for c, h := range iHeaders {
-		invTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		invTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, inv := range u.State.InvalidObjects {
 		r := i + 1
 		invTbl.SetCell(r, 0, tview.NewTableCell(inv.Owner))
-		invTbl.SetCell(r, 1, tview.NewTableCell(inv.ObjectName))
+		invTbl.SetCell(r, 1, KeyCell(inv.ObjectName))
 		invTbl.SetCell(r, 2, tview.NewTableCell(inv.ObjectType))
-		invTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(inv.Status)))
+		invTbl.SetCell(r, 3, StatusCell(inv.Status))
 		invTbl.SetCell(r, 4, tview.NewTableCell(inv.LastDDL))
 	}
 	ensureSelectableRow(invTbl, len(iHeaders), "0 Objetos Invalidos (Todos los objetos estan VALID)")
@@ -1321,22 +1576,22 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	asmTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup)", "Clic/Enter = Control Listener │ ←/→ Ventana"))
 	aHeaders := []string{"DISKGROUP", "ESTADO", "REDUNDANCIA", "TOTAL_MB", "LIBRE_MB", "USABLE_MB", "USO % (BARRA)", "DISCOS_OFFLINE"}
 	for c, h := range aHeaders {
-		asmTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		asmTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, dg := range u.State.Diskgroups {
 		r := i + 1
-		asmTbl.SetCell(r, 0, tview.NewTableCell("[white::b]"+dg.Name))
-		asmTbl.SetCell(r, 1, tview.NewTableCell(ColorStatus(dg.State)))
+		asmTbl.SetCell(r, 0, KeyCell(dg.Name))
+		asmTbl.SetCell(r, 1, StatusCell(dg.State))
 		asmTbl.SetCell(r, 2, tview.NewTableCell(dg.Type))
 		asmTbl.SetCell(r, 3, tview.NewTableCell(fmt.Sprintf("%d MB", dg.TotalMB)))
 		asmTbl.SetCell(r, 4, tview.NewTableCell(fmt.Sprintf("%d MB", dg.FreeMB)))
 		asmTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%d MB", dg.UsableMB)))
-		asmTbl.SetCell(r, 6, tview.NewTableCell(ASCIIBar(dg.UsedPct, 12, true)))
-		off := fmt.Sprintf("[green]%d[-]", dg.OfflineDisks)
+		asmTbl.SetCell(r, 6, BarCell(dg.UsedPct, 12))
+		offSt := fmt.Sprintf("%d", dg.OfflineDisks)
 		if dg.OfflineDisks > 0 {
-			off = fmt.Sprintf("[red::b]%d[-::-]", dg.OfflineDisks)
+			offSt = fmt.Sprintf("%d OFFLINE", dg.OfflineDisks)
 		}
-		asmTbl.SetCell(r, 7, tview.NewTableCell(off))
+		asmTbl.SetCell(r, 7, StatusCell(offSt))
 	}
 	ensureSelectableRow(asmTbl, len(aHeaders), "Sin Diskgroups ASM (Almacenamiento en Filesystem - Clic o Enter para Listeners)")
 	u.bindTableActions(asmTbl, func(row, col int) {
@@ -1347,7 +1602,7 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	lsnrTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] RED ORACLE: LISTENERS LOCALES & SCAN", "Clic/Enter = Arrancar/Parar/Resetear │ ←/→ Ventana"))
 	lHeaders := []string{"LISTENER", "TIPO", "NODO", "PROCESO", "ESTADO_READY", "ENDPOINT", "SERVICIOS DETECTADOS"}
 	for c, h := range lHeaders {
-		lsnrTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		lsnrTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, l := range u.State.Listeners {
 		r := i + 1
@@ -1359,13 +1614,13 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 		if svcSummary == "" {
 			svcSummary = fmt.Sprintf("%d servicios", l.Services)
 		}
-		lsnrTbl.SetCell(r, 0, tview.NewTableCell("[white::b]"+l.Name))
+		lsnrTbl.SetCell(r, 0, KeyCell(l.Name))
 		lsnrTbl.SetCell(r, 1, tview.NewTableCell(l.Type))
 		lsnrTbl.SetCell(r, 2, tview.NewTableCell(l.Node))
-		lsnrTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(l.State)))
-		lsnrTbl.SetCell(r, 4, tview.NewTableCell(ColorStatus(readySt)))
+		lsnrTbl.SetCell(r, 3, StatusCell(l.State))
+		lsnrTbl.SetCell(r, 4, StatusCell(readySt))
 		lsnrTbl.SetCell(r, 5, tview.NewTableCell(l.Endpoint))
-		lsnrTbl.SetCell(r, 6, tview.NewTableCell("[aqua]"+svcSummary+"[-]"))
+		lsnrTbl.SetCell(r, 6, AccentCell(svcSummary))
 	}
 	ensureSelectableRow(lsnrTbl, len(lHeaders), "Sin listeners activos (Clic o Enter para Arrancar / Controlar Listener)")
 	u.bindTableActions(lsnrTbl, func(row, col int) {
@@ -1380,24 +1635,22 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	svcTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] DETALLE DE SERVICIOS EN LISTENER (READY / UNKNOWN / BLOCKED)", "Clic/Enter = Arrancar/Parar/Resetear │ ←/→ Ventana"))
 	sHeaders := []string{"LISTENER", "SERVICIO", "INSTANCIA", "ESTADO_REAL", "TIPO_REGISTRO / DISPONIBILIDAD", "HANDLERS"}
 	for c, h := range sHeaders {
-		svcTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		svcTbl.SetCell(0, c, HeaderCell(h))
 	}
 	svcRow := 1
 	for _, l := range u.State.Listeners {
 		for _, sh := range l.ServiceList {
-			regDesc := "DINAMICO (LREG/PMON - Acepta Conexiones)"
+			regDesc := "DINAMICO (LREG/PMON - Listo para conexiones)"
 			switch strings.ToUpper(sh.Status) {
 			case "UNKNOWN":
-				regDesc = "[yellow]ESTATICO (listener.ora - No garantiza BD arriba)[-]"
+				regDesc = "ESTATICO (listener.ora - No garantiza BD arriba)"
 			case "BLOCKED", "RESTRICTED":
-				regDesc = "[red]BLOQUEADO (Instancia en MOUNT/NOMOUNT/RESTRICTED)[-]"
-			case "READY":
-				regDesc = "[green]DINAMICO (LREG/PMON - Listo para conexiones)[-]"
+				regDesc = "BLOQUEADO (Instancia en MOUNT/NOMOUNT/RESTRICTED)"
 			}
 			svcTbl.SetCell(svcRow, 0, tview.NewTableCell(sh.ListenerName))
-			svcTbl.SetCell(svcRow, 1, tview.NewTableCell("[white::b]"+sh.ServiceName))
+			svcTbl.SetCell(svcRow, 1, KeyCell(sh.ServiceName))
 			svcTbl.SetCell(svcRow, 2, tview.NewTableCell(sh.InstanceName))
-			svcTbl.SetCell(svcRow, 3, tview.NewTableCell(ColorStatus(sh.Status)))
+			svcTbl.SetCell(svcRow, 3, StatusCell(sh.Status))
 			svcTbl.SetCell(svcRow, 4, tview.NewTableCell(regDesc))
 			svcTbl.SetCell(svcRow, 5, tview.NewTableCell(fmt.Sprintf("%d handler(s)", sh.Handlers)))
 			svcRow++
@@ -1526,13 +1779,13 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 	rmanTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] HISTORIAL DE BACKUPS RMAN", "Clic/Enter = Lanzar Backup │ ←/→ Ventana"))
 	rHeaders := []string{"SESSION_KEY", "TIPO BACKUP", "ESTADO", "INICIO", "DURACION", "TAMANO_GB", "DISPOSITIVO"}
 	for c, h := range rHeaders {
-		rmanTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		rmanTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, b := range u.State.RMANBackups {
 		r := i + 1
 		rmanTbl.SetCell(r, 0, tview.NewTableCell(fmt.Sprintf("%d", b.SessionKey)))
-		rmanTbl.SetCell(r, 1, tview.NewTableCell("[white::b]"+b.InputType))
-		rmanTbl.SetCell(r, 2, tview.NewTableCell(ColorStatus(b.Status)))
+		rmanTbl.SetCell(r, 1, KeyCell(b.InputType))
+		rmanTbl.SetCell(r, 2, StatusCell(b.Status))
 		rmanTbl.SetCell(r, 3, tview.NewTableCell(b.StartTime))
 		rmanTbl.SetCell(r, 4, tview.NewTableCell(b.Duration))
 		rmanTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%.1f GB", b.SizeGB)))
@@ -1588,14 +1841,14 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 	rpTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] FLASHBACK & PUNTOS DE RESTAURACION (v$restore_point)", "Clic/Enter = Crear/Gestionar GRP │ ←/→ Ventana"))
 	rpHeaders := []string{"NOMBRE RESTORE POINT", "SCN", "FECHA CREACION", "GARANTIZADO", "USO EN FRA"}
 	for c, h := range rpHeaders {
-		rpTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		rpTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, rp := range u.State.RestorePoints {
 		r := i + 1
-		rpTbl.SetCell(r, 0, tview.NewTableCell("[aqua::b]"+rp.Name))
+		rpTbl.SetCell(r, 0, AccentCell(rp.Name))
 		rpTbl.SetCell(r, 1, tview.NewTableCell(fmt.Sprintf("%d", rp.SCN)))
 		rpTbl.SetCell(r, 2, tview.NewTableCell(rp.Time))
-		rpTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(rp.Guaranteed)))
+		rpTbl.SetCell(r, 3, StatusCell(rp.Guaranteed))
 		rpTbl.SetCell(r, 4, tview.NewTableCell(rp.StorageSize))
 	}
 	ensureSelectableRow(rpTbl, len(rpHeaders), "Sin puntos de restauracion activos (Clic o Enter para crear GRP)")
@@ -1605,18 +1858,18 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 	dgTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] DATA GUARD STANDBY & REPLICACION (v$dataguard_stats)", "Clic/Enter = Operaciones Data Guard │ ←/→ Ventana"))
 	dgHeaders := []string{"STANDBY DB", "ROL", "HOST DESTINO", "OPEN_MODE", "TRANSPORT_LAG", "APPLY_LAG", "ESTADO MRP0", "SWITCHOVER"}
 	for c, h := range dgHeaders {
-		dgTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		dgTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, dg := range u.State.StandbyDBs {
 		r := i + 1
-		dgTbl.SetCell(r, 0, tview.NewTableCell("[white::b]"+dg.DBUniqueName))
+		dgTbl.SetCell(r, 0, KeyCell(dg.DBUniqueName))
 		dgTbl.SetCell(r, 1, tview.NewTableCell(dg.Role))
 		dgTbl.SetCell(r, 2, tview.NewTableCell(dg.Host))
-		dgTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(dg.OpenMode)))
-		dgTbl.SetCell(r, 4, tview.NewTableCell("[green]"+dg.TransportLag+"[-]"))
-		dgTbl.SetCell(r, 5, tview.NewTableCell("[green]"+dg.ApplyLag+"[-]"))
-		dgTbl.SetCell(r, 6, tview.NewTableCell(ColorStatus(dg.MRPStatus)))
-		dgTbl.SetCell(r, 7, tview.NewTableCell(ColorStatus(dg.Switchover)))
+		dgTbl.SetCell(r, 3, StatusCell(dg.OpenMode))
+		dgTbl.SetCell(r, 4, StatusCell(dg.TransportLag))
+		dgTbl.SetCell(r, 5, StatusCell(dg.ApplyLag))
+		dgTbl.SetCell(r, 6, StatusCell(dg.MRPStatus))
+		dgTbl.SetCell(r, 7, StatusCell(dg.Switchover))
 	}
 	ensureSelectableRow(dgTbl, len(dgHeaders), "Sin standby Data Guard configurada")
 	u.bindTableActions(dgTbl, func(row, col int) {
@@ -1648,14 +1901,14 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 	alertTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] ERRORES ORA-* EN ALERT LOG (Filtro Estricto ^ORA-)", "Clic/Enter = Diagnosticar / oerr │ ←/→ Ventana"))
 	headers := []string{"TIMESTAMP", "INSTANCIA", "TIPO", "CODIGO ORA-", "MENSAJE DE ERROR EN ALERT LOG"}
 	for c, h := range headers {
-		alertTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		alertTbl.SetCell(0, c, HeaderCell(h))
 	}
 	for i, a := range u.State.AlertEntries {
 		r := i + 1
 		alertTbl.SetCell(r, 0, tview.NewTableCell(a.Timestamp))
 		alertTbl.SetCell(r, 1, tview.NewTableCell(a.Instance))
-		alertTbl.SetCell(r, 2, tview.NewTableCell("[red]"+a.Severity+"[-]"))
-		alertTbl.SetCell(r, 3, tview.NewTableCell("[red::b]"+a.ErrorCode+"[-::-]"))
+		alertTbl.SetCell(r, 2, StatusCell(a.Severity))
+		alertTbl.SetCell(r, 3, StatusCell(a.ErrorCode))
 		alertTbl.SetCell(r, 4, tview.NewTableCell(a.Message))
 	}
 	ensureSelectableRow(alertTbl, len(headers), "0 errores ORA-* detectados en el Alert Log reciente (Base de datos sin alertas ORA-)")
@@ -1702,7 +1955,7 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 	diagTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] HERRAMIENTAS DE DIAGNOSTICO ADR & CONTROL DE ALERT.LOG", "Clic/Enter = Ejecutar │ ←/→ Ventana"))
 	dHeaders := []string{"HERRAMIENTA / RECURSO", "RUTA / PARAMETRO ACTUAL", "ESTADO / METRICA", "ACCION DISPONIBLE (CLIC / ENTER)"}
 	for c, h := range dHeaders {
-		diagTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+		diagTbl.SetCell(0, c, HeaderCell(h))
 	}
 
 	traceDir := u.State.DiagTraceDir
@@ -1719,7 +1972,7 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 		sizeStr = "ONLINE"
 	}
 
-	oraSummary := "[green]0 Errores ORA- activos[-]"
+	oraSummary := "0 Errores ORA- activos (ONLINE)"
 	if len(u.State.AlertEntries) > 0 {
 		counts := make(map[string]int)
 		for _, e := range u.State.AlertEntries {
@@ -1729,21 +1982,21 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 		for k, v := range counts {
 			parts = append(parts, fmt.Sprintf("%s(%d)", k, v))
 		}
-		oraSummary = "[red]" + strings.Join(parts, ", ") + "[-]"
+		oraSummary = strings.Join(parts, ", ")
 	}
 
 	diagRows := [][]string{
-		{"[white::b]1. Archivo Alert Log[-::-]", alertPath, "[aqua]" + sizeStr + "[-]", "Rotar / Limpiar alert.log o Forzar Switch Logfile"},
-		{"[white::b]2. Resumen Codigos ORA-[-::-]", "Filtro estricto ^ORA- (Ignora OPatch)", oraSummary, "Consultar Causa/Solucion con utilidad oerr"},
-		{"[white::b]3. Mantenimiento ADRCI[-::-]", traceDir, "[green]ADR ONLINE[-]", "Purgar trazas (.trc/.trm) e incidentes > 7 dias"},
-		{"[white::b]4. Redo Log & Checkpoint[-::-]", "ALTER SYSTEM SWITCH LOGFILE / CHECKPOINT", "[green]OPEN[-]", "Avanzar secuencia Redo y verificar escritura Alert"},
+		{"1. Archivo Alert Log", alertPath, sizeStr, "Rotar / Limpiar alert.log o Forzar Switch Logfile"},
+		{"2. Resumen Codigos ORA-", "Filtro estricto ^ORA- (Ignora OPatch)", oraSummary, "Consultar Causa/Solucion con utilidad oerr"},
+		{"3. Mantenimiento ADRCI", traceDir, "ADR ONLINE", "Purgar trazas (.trc/.trm) e incidentes > 7 dias"},
+		{"4. Redo Log & Checkpoint", "ALTER SYSTEM SWITCH LOGFILE / CHECKPOINT", "OPEN", "Avanzar secuencia Redo y verificar escritura Alert"},
 	}
 	for i, dr := range diagRows {
 		r := i + 1
-		diagTbl.SetCell(r, 0, tview.NewTableCell(dr[0]))
+		diagTbl.SetCell(r, 0, KeyCell(dr[0]))
 		diagTbl.SetCell(r, 1, tview.NewTableCell(dr[1]))
-		diagTbl.SetCell(r, 2, tview.NewTableCell(dr[2]))
-		diagTbl.SetCell(r, 3, tview.NewTableCell("[aqua]"+dr[3]+"[-]"))
+		diagTbl.SetCell(r, 2, StatusCell(dr[2]))
+		diagTbl.SetCell(r, 3, AccentCell(dr[3]))
 	}
 	diagTbl.Select(1, 0)
 
@@ -1784,16 +2037,26 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 	tailBox.SetBorder(true).SetTitle(u.winTitle("[3/3] TAIL EN VIVO DE ALERT_"+instSID+".LOG (Ultimas Lineas del Motor)", "←/→ Ventana"))
 
 	if len(u.State.AlertTailLines) == 0 {
-		tailBox.SetText(" [gray]Sin actividad reciente en el tail del Alert Log.[-]")
+		tailBox.SetText(" Sin actividad reciente en el tail del Alert Log.")
 	} else {
 		var sb strings.Builder
 		for _, line := range u.State.AlertTailLines {
-			if strings.Contains(line, "ORA-") {
-				sb.WriteString(" [red::b]" + line + "[-::-]\n")
-			} else if strings.Contains(line, "Thread ") || strings.Contains(line, "ALTER ") || strings.Contains(line, "Completed") {
-				sb.WriteString(" [green]" + line + "[-]\n")
+			if u.ColorTheme == ThemeGreenPhosphor {
+				if strings.Contains(line, "ORA-") {
+					sb.WriteString(" [#001000:#33ff33:b] " + line + " [-:-:-]\n")
+				} else if strings.Contains(line, "Thread ") || strings.Contains(line, "ALTER ") || strings.Contains(line, "Completed") {
+					sb.WriteString(" [#99ff99::b]" + line + "[-::-]\n")
+				} else {
+					sb.WriteString(" [#33ff33]" + line + "[-]\n")
+				}
 			} else {
-				sb.WriteString(" [white]" + line + "[-]\n")
+				if strings.Contains(line, "ORA-") {
+					sb.WriteString(" [#ff5555::b]" + line + "[-::-]\n")
+				} else if strings.Contains(line, "Thread ") || strings.Contains(line, "ALTER ") || strings.Contains(line, "Completed") {
+					sb.WriteString(" [#55ff55]" + line + "[-]\n")
+				} else {
+					sb.WriteString(" [#ffffff]" + line + "[-]\n")
+				}
 			}
 		}
 		tailBox.SetText(sb.String())
@@ -1962,30 +2225,54 @@ func (u *AppUI) showGlobalMaintenancePopup() {
 	u.showActionMenuModal(" ══ MENU RAPIDO DE MANTENIMIENTO [F1 = Mostrar/Ocultar Ayuda] ══ ", u.getAllMaintenanceActions())
 }
 
-// showActionMenuModal displays a double-bordered Unicode popup window where all options
-// fit on screen simultaneously without horizontal or vertical scrolling.
+// showActionMenuModal displays a popup dialog box styled for the active theme:
+// - Norton Commander: Silver (#A8A8A8) dialog with 1-char outer rim, Double Bright White border, White text, and Bright Yellow (#FFFF55) cursor bar.
+// - Borland Turbo C++ 3.0: Silver (#A8A8A8) dropdown with 1-char outer rim, Single Black border, Red (#A80000) hotkeys, Black text, and Green (#00A800) cursor bar.
+// - Green Phosphor CRT: Dark green (#002A00) dialog with Double Bright Phosphor border and inverse #33FF33 cursor bar.
 func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 	pal := currentPalette
 	list := tview.NewList().
 		ShowSecondaryText(false).
 		SetHighlightFullLine(true)
 	list.SetBackgroundColor(pal.ModalBg)
-	list.SetMainTextStyle(tcell.StyleDefault.Background(pal.ModalBg).Foreground(pal.ModalFg))
+	list.SetMainTextStyle(tcell.StyleDefault.Background(pal.ModalBg).Foreground(pal.ModalFg).Bold(u.ColorTheme == ThemeNorton))
 	list.SetSelectedBackgroundColor(pal.ModalCursorBg)
 	list.SetSelectedTextColor(pal.ModalCursorFg)
+
+	cleanTitle := strings.TrimSpace(title)
+	modalTitle := title
+	switch u.ColorTheme {
+	case ThemeTurboC:
+		modalTitle = fmt.Sprintf("[#000000:#a8a8a8:b] %s [-:-:-]", cleanTitle)
+	case ThemeNorton:
+		modalTitle = fmt.Sprintf("[#ffffff:#a8a8a8:b] %s [-:-:-]", cleanTitle)
+	case ThemeGreenPhosphor:
+		modalTitle = fmt.Sprintf("[#001000:#33ff33:b] %s [-:-:-]", cleanTitle)
+	}
+
 	list.SetBorder(true).
 		SetBorderColor(pal.ModalBorder).
 		SetTitleColor(pal.ModalTitle).
-		SetTitle(title)
+		SetTitle(modalTitle)
 	u.activeModalList = list
 
-	maxWidth := len(title) + 6
+	maxWidth := len(cleanTitle) + 8
 	for i, act := range actions {
 		fn := act.handler
 		actTitle := act.title
-		line := fmt.Sprintf(" ▸ [%d] %s", i+1, actTitle)
-		if u.ShowMenuHelp && act.subtitle != "" {
-			line = fmt.Sprintf(" ▸ [%d] %-52s │ %s", i+1, actTitle, act.subtitle)
+		var line string
+		if u.ColorTheme == ThemeTurboC {
+			if u.ShowMenuHelp && act.subtitle != "" {
+				line = fmt.Sprintf(" ▸ [#a80000::b][%d][-::-] %-52s │ %s", i+1, actTitle, act.subtitle)
+			} else {
+				line = fmt.Sprintf(" ▸ [#a80000::b][%d][-::-] %s", i+1, actTitle)
+			}
+		} else {
+			if u.ShowMenuHelp && act.subtitle != "" {
+				line = fmt.Sprintf(" ▸ [%d] %-52s │ %s", i+1, actTitle, act.subtitle)
+			} else {
+				line = fmt.Sprintf(" ▸ [%d] %s", i+1, actTitle)
+			}
 		}
 		plainLen := len(actTitle) + len(act.subtitle) + 18
 		if plainLen > maxWidth {
@@ -1997,13 +2284,19 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 			u.showConfirmModal(actTitle, fn)
 		})
 	}
-	list.AddItem(" ▸ [F1] Mostrar / Ocultar Ayuda en este Menu", "", 0, func() {
+	f1Line := " ▸ [F1] Mostrar / Ocultar Ayuda en este Menu"
+	escLine := " ▸ [Esc / Clic Derecho] Cancelar / Cerrar Ventana"
+	if u.ColorTheme == ThemeTurboC {
+		f1Line = " ▸ [#a80000::b][F1][-::-] Mostrar / Ocultar Ayuda en este Menu"
+		escLine = " ▸ [#a80000::b][Esc / Clic Derecho][-::-] Cancelar / Cerrar Ventana"
+	}
+	list.AddItem(f1Line, "", 0, func() {
 		u.Pages.RemovePage("modal")
 		u.activeModalList = nil
 		u.toggleMenuHelp()
 		u.showActionMenuModal(title, actions)
 	})
-	list.AddItem(" ▸ [Esc / Clic Derecho] Cancelar / Cerrar Ventana", "", 0, func() {
+	list.AddItem(escLine, "", 0, func() {
 		u.Pages.RemovePage("modal")
 		u.activeModalList = nil
 		u.focusFirstRightWindow()
@@ -2018,12 +2311,20 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 		maxWidth = 114
 	}
 
+	// 1-character outer dialog rim on left and right, matching Norton Commander & Borland Turbo C++ dialog boxes
+	leftRim := tview.NewBox().SetBackgroundColor(pal.ModalBg)
+	rightRim := tview.NewBox().SetBackgroundColor(pal.ModalBg)
+	framedModal := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(leftRim, 1, 0, false).
+		AddItem(list, 0, 1, true).
+		AddItem(rightRim, 1, 0, false)
+
 	modalFlex := tview.NewFlex().
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
-			AddItem(list, modalHeight, 1, true).
-			AddItem(nil, 0, 1, false), maxWidth, 1, true).
+			AddItem(framedModal, modalHeight, 1, true).
+			AddItem(nil, 0, 1, false), maxWidth+2, 1, true).
 		AddItem(nil, 0, 1, false)
 
 	u.Pages.AddPage("modal", modalFlex, true, true)
@@ -2037,7 +2338,7 @@ func (u *AppUI) showConfirmModal(taskName string, onConfirm func()) {
 		ShowSecondaryText(false).
 		SetHighlightFullLine(true)
 	list.SetBackgroundColor(pal.ConfirmBg)
-	list.SetMainTextStyle(tcell.StyleDefault.Background(pal.ConfirmBg).Foreground(pal.ConfirmFg))
+	list.SetMainTextStyle(tcell.StyleDefault.Background(pal.ConfirmBg).Foreground(pal.ConfirmFg).Bold(true))
 	list.SetSelectedBackgroundColor(pal.ConfirmCursorBg)
 	list.SetSelectedTextColor(pal.ConfirmCursorFg)
 	title := fmt.Sprintf(" ══ CONFIRMAR OPERACION: %s ══ ", taskName)
@@ -2069,12 +2370,19 @@ func (u *AppUI) showConfirmModal(taskName string, onConfirm func()) {
 		maxWidth = 110
 	}
 
+	leftRim := tview.NewBox().SetBackgroundColor(pal.ConfirmBg)
+	rightRim := tview.NewBox().SetBackgroundColor(pal.ConfirmBg)
+	framedConfirm := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(leftRim, 1, 0, false).
+		AddItem(list, 0, 1, true).
+		AddItem(rightRim, 1, 0, false)
+
 	modalFlex := tview.NewFlex().
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
-			AddItem(list, 4, 1, true).
-			AddItem(nil, 0, 1, false), maxWidth, 1, true).
+			AddItem(framedConfirm, 4, 1, true).
+			AddItem(nil, 0, 1, false), maxWidth+2, 1, true).
 		AddItem(nil, 0, 1, false)
 
 	u.Pages.AddPage("modal", modalFlex, true, true)
