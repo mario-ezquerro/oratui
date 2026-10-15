@@ -11,18 +11,26 @@ import (
 )
 
 type AppUI struct {
-	App            *tview.Application
-	Pages          *tview.Pages
-	State          *model.EnvironmentState
-	Header         *tview.TextView
-	NavList        *tview.List
-	Content        *tview.Pages
-	LogView        *tview.TextView
-	Footer         *tview.TextView
+	App             *tview.Application
+	Pages           *tview.Pages
+	State           *model.EnvironmentState
+	Header          *tview.TextView
+	NavList         *tview.List
+	MidFlex         *tview.Flex
+	Content         *tview.Pages
+	LogView         *tview.TextView
+	Footer          *tview.TextView
 	ActiveView      string
 	ShowMenuHelp    bool
 	activeModalList *tview.List
 	viewFocusables  map[string][]tview.Primitive
+}
+
+type navEntry struct {
+	key   string
+	short string
+	help  string
+	fn    func()
 }
 
 func NewAppUI(state *model.EnvironmentState) *AppUI {
@@ -70,51 +78,70 @@ func ensureSelectableRow(tbl *tview.Table, colCount int, emptyMsg string) {
 	tbl.Select(1, 0)
 }
 
+func (u *AppUI) navEntries() []navEntry {
+	return []navEntry{
+		{"overview", "1. Cluster & DB Estado", "Nodos, Inst, PDBs", func() { u.switchViewAndFocus("overview") }},
+		{"sessions", "2. Usuarios Conectados", "Sesiones & Locks", func() { u.switchViewAndFocus("sessions") }},
+		{"tablespaces", "3. Tablespaces & Files", "Uso % & Datafiles", func() { u.switchViewAndFocus("tablespaces") }},
+		{"tables", "4. Tablas & Objetos", "Stats & Invalidos", func() { u.switchViewAndFocus("tables") }},
+		{"asm_net", "5. ASM & Red Listeners", "Diskgroups & SCAN", func() { u.switchViewAndFocus("asm_net") }},
+		{"rman_dg", "6. RMAN, Flashback & DG", "Backups & Standby", func() { u.switchViewAndFocus("rman_dg") }},
+		{"alert_log", "7. Alert Log & Errores", "ORA- & ADRCI Purge", func() { u.switchViewAndFocus("alert_log") }},
+		{"maintenance", "8. Centro Mantenimiento", "Asistentes Guiados", func() { u.switchViewAndFocus("maintenance") }},
+		{"", "F1. Ayuda en Menus", "Ocultar/Ver Ayuda", func() { u.toggleMenuHelp() }},
+		{"", "b. Cambiar Marcos", "Simple ┌─┐ / ╔═╗", func() { u.cycleBorderMode() }},
+		{"", "t. Cambiar Topologia", "RAC / Single Inst", func() { u.toggleTopology() }},
+		{"", "q. Salir (Ctrl+C)", "Cerrar programa", func() { u.App.Stop() }},
+	}
+}
+
+func (u *AppUI) populateNavList() {
+	currIdx := u.NavList.GetCurrentItem()
+	u.NavList.Clear()
+	u.NavList.ShowSecondaryText(false)
+	u.NavList.SetTitle(u.winTitle("MENU", "↑↓ / →"))
+
+	entries := u.navEntries()
+	for _, e := range entries {
+		label := " " + e.short
+		if u.ShowMenuHelp {
+			label = fmt.Sprintf(" %-24s [gray]│ %s[-]", e.short, e.help)
+		}
+		u.NavList.AddItem(label, "", 0, e.fn)
+	}
+	if currIdx >= 0 && currIdx < u.NavList.GetItemCount() {
+		u.NavList.SetCurrentItem(currIdx)
+	}
+}
+
+func (u *AppUI) navMenuWidth() int {
+	if u.ShowMenuHelp {
+		return 48
+	}
+	return 27
+}
+
 func (u *AppUI) buildLayout() {
-	// 1. Header Banner
+	// 1. Header Banner (4 rows: 2 content lines + 2 border lines)
 	u.Header = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft)
 	u.Header.SetBorder(true).SetTitle(" ══ ORA-TUI :: ORACLE CLUSTER & DATABASE MANAGER ══ ")
 	u.refreshHeader()
 
-	// 2. Left Arrow-Key Navigation Menu
+	// 2. Left Arrow-Key Navigation Menu (Single-line items so all 12 options always fit without scrolling)
 	u.NavList = tview.NewList().
-		ShowSecondaryText(u.ShowMenuHelp).
+		ShowSecondaryText(false).
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(tcell.ColorNavy).
 		SetSelectedTextColor(tcell.ColorWhite)
-	u.NavList.SetBorder(true).SetTitle(u.winTitle("MENU", "↑↓ / → Ventana"))
+	u.NavList.SetBorder(true)
+	u.populateNavList()
 
-	viewKeys := []string{
-		"overview",
-		"sessions",
-		"tablespaces",
-		"tables",
-		"asm_net",
-		"rman_dg",
-		"alert_log",
-		"maintenance",
-	}
-
-	u.NavList.
-		AddItem("1. Cluster & DB Estado", "   Nodos, Instancias, PDBs", '1', func() { u.switchViewAndFocus("overview") }).
-		AddItem("2. Usuarios Conectados", "   Sesiones, Locks, SQL_ID", '2', func() { u.switchViewAndFocus("sessions") }).
-		AddItem("3. Tablespaces & Files", "   Uso %, Datafiles, Temp", '3', func() { u.switchViewAndFocus("tablespaces") }).
-		AddItem("4. Tablas & Objetos", "   Segmentos, Stats, Invalid", '4', func() { u.switchViewAndFocus("tables") }).
-		AddItem("5. ASM & Red Listeners", "   Diskgroups, SCAN, Local", '5', func() { u.switchViewAndFocus("asm_net") }).
-		AddItem("6. RMAN, Flashback & DG", "   Backups, GRP, Data Guard", '6', func() { u.switchViewAndFocus("rman_dg") }).
-		AddItem("7. Alert Log & Errores", "   Visor ORA-, ADRCI Purge", '7', func() { u.switchViewAndFocus("alert_log") }).
-		AddItem("8. Centro Mantenimiento", "   Asistentes DBA Guiados", '8', func() { u.switchViewAndFocus("maintenance") }).
-		AddItem("h. Ayuda Menus (F1)", "   Mostrar/Ocultar ayudas", 'h', func() { u.toggleMenuHelp() }).
-		AddItem("b. Cambiar Marcos/Bordes", "   Simple ┌─┐ / Doble ╔═╗", 'b', func() { u.cycleBorderMode() }).
-		AddItem("t. Cambiar Topologia", "   Alternar RAC / Single", 't', func() { u.toggleTopology() }).
-		AddItem("q. Salir (Ctrl+C / q)", "   Cerrar herramienta", 'q', func() { u.App.Stop() })
-
-	// Preview view automatically when moving Up/Down in the left menu
+	entries := u.navEntries()
 	u.NavList.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
-		if index >= 0 && index < len(viewKeys) {
-			viewName := viewKeys[index]
+		if index >= 0 && index < len(entries) && entries[index].key != "" {
+			viewName := entries[index].key
 			u.ActiveView = viewName
 			u.Content.SwitchToPage(viewName)
 		}
@@ -123,7 +150,7 @@ func (u *AppUI) buildLayout() {
 	// 3. Content Workspace Pages
 	u.Content = tview.NewPages()
 
-	// 4. Live Execution Log Panel
+	// 4. Live Execution Log Panel (5 rows: 3 log lines + 2 border lines)
 	u.LogView = tview.NewTextView().
 		SetDynamicColors(true).
 		SetScrollable(true).
@@ -142,21 +169,21 @@ func (u *AppUI) buildLayout() {
 	u.rebuildContentViews()
 
 	// Main Middle Flex (Left Menu + Right Content)
-	midFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(u.NavList, 29, 0, true).
+	u.MidFlex = tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(u.NavList, u.navMenuWidth(), 0, true).
 		AddItem(u.Content, 0, 1, false)
 
 	// Root Vertical Flex
 	mainFlex := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(u.Header, 5, 0, false).
-		AddItem(midFlex, 0, 1, true).
-		AddItem(u.LogView, 8, 0, false).
+		AddItem(u.Header, 4, 0, false).
+		AddItem(u.MidFlex, 0, 1, true).
+		AddItem(u.LogView, 5, 0, false).
 		AddItem(u.Footer, 1, 0, false)
 
 	u.Pages.AddPage("main", mainFlex, true, true)
 	u.App.SetRoot(u.Pages, true)
 
-	// Global keyboard navigation (including F1 help toggle, Left/Right arrows between windows, and Ctrl+C exit)
+	// Global keyboard navigation
 	u.App.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		// Always allow Ctrl+C to immediately exit the program
 		if event.Key() == tcell.KeyCtrlC {
@@ -192,6 +219,38 @@ func (u *AppUI) buildLayout() {
 			return nil
 		case tcell.KeyRune:
 			switch event.Rune() {
+			case '1':
+				u.NavList.SetCurrentItem(0)
+				u.switchViewAndFocus("overview")
+				return nil
+			case '2':
+				u.NavList.SetCurrentItem(1)
+				u.switchViewAndFocus("sessions")
+				return nil
+			case '3':
+				u.NavList.SetCurrentItem(2)
+				u.switchViewAndFocus("tablespaces")
+				return nil
+			case '4':
+				u.NavList.SetCurrentItem(3)
+				u.switchViewAndFocus("tables")
+				return nil
+			case '5':
+				u.NavList.SetCurrentItem(4)
+				u.switchViewAndFocus("asm_net")
+				return nil
+			case '6':
+				u.NavList.SetCurrentItem(5)
+				u.switchViewAndFocus("rman_dg")
+				return nil
+			case '7':
+				u.NavList.SetCurrentItem(6)
+				u.switchViewAndFocus("alert_log")
+				return nil
+			case '8':
+				u.NavList.SetCurrentItem(7)
+				u.switchViewAndFocus("maintenance")
+				return nil
 			case 'h', 'H':
 				u.toggleMenuHelp()
 				return nil
@@ -201,6 +260,9 @@ func (u *AppUI) buildLayout() {
 			case 'b', 'B':
 				u.cycleBorderMode()
 				return nil
+			case 't', 'T':
+				u.toggleTopology()
+				return nil
 			case 'q', 'Q':
 				u.App.Stop()
 				return nil
@@ -209,12 +271,10 @@ func (u *AppUI) buildLayout() {
 		return event
 	})
 
-	u.Logf("Auto-Discovery completado: Modo=%s │ Host=%s │ Version=%s", u.State.Topology, u.State.HostName, u.State.ReleaseVersion)
-	u.Logf("Navegacion: [yellow]←/→[-] Cambiar Ventana │ [yellow]↑/↓[-] Mover Fila │ [yellow]F1 (o h)[-] Ocultar/Mostrar Ayuda en Menus │ [yellow]Ctrl+C[-] Salir.")
+	u.Logf("Auto-Discovery: Modo=%s │ Host=%s │ Ver=%s │ [yellow]←/→[-] Ventana │ [yellow]F1[-] Ayuda ON/OFF │ [yellow]Ctrl+C[-] Salir",
+		u.State.Topology, u.State.HostName, u.State.ReleaseVersion)
 }
 
-// moveWindowFocus moves focus forward (+1, Right Arrow / Tab) or backward (-1, Left Arrow / Shift+Tab)
-// across the Left Menu (NavList) and all sub-windows of the currently active view.
 func (u *AppUI) moveWindowFocus(delta int) {
 	chain := append([]tview.Primitive{u.NavList}, u.viewFocusables[u.ActiveView]...)
 	if len(chain) <= 1 {
@@ -264,8 +324,10 @@ func (u *AppUI) RefreshAll() {
 
 func (u *AppUI) toggleMenuHelp() {
 	u.ShowMenuHelp = !u.ShowMenuHelp
-	u.NavList.ShowSecondaryText(u.ShowMenuHelp)
-	u.NavList.SetTitle(u.winTitle("MENU", "↑↓ / → Ventana"))
+	u.populateNavList()
+	if u.MidFlex != nil {
+		u.MidFlex.ResizeItem(u.NavList, u.navMenuWidth(), 0)
+	}
 	if u.activeModalList != nil {
 		u.activeModalList.ShowSecondaryText(u.ShowMenuHelp)
 	}
@@ -276,7 +338,7 @@ func (u *AppUI) toggleMenuHelp() {
 	if !u.ShowMenuHelp {
 		stateStr = "[yellow]OCULTA (Modo Compacto)[-]"
 	}
-	u.Logf("Ayuda en menus y titulos: %s (Pulse [yellow]F1[-] o [yellow]h[-] para alternar).", stateStr)
+	u.Logf("Ayuda en menus: %s (Pulse [yellow]F1[-] o [yellow]h[-] para alternar).", stateStr)
 }
 
 func (u *AppUI) refreshFooter() {
@@ -285,7 +347,7 @@ func (u *AppUI) refreshFooter() {
 		helpState = "OFF"
 	}
 	u.Footer.SetText(fmt.Sprintf(
-		"[yellow][←/→][-] Ventana │ [yellow][↑/↓][-] Fila │ [yellow][Enter][-] Acciones │ [yellow][F1 / h][-] Ayuda Menus: [aqua]%s[-] │ [yellow][m][-] Mantenimiento │ [yellow][b][-] Marcos │ [yellow][Ctrl+C / q][-] Salir",
+		"[yellow][←/→][-] Ventana │ [yellow][↑/↓][-] Fila │ [yellow][Enter][-] Acciones │ [yellow][F1/h][-] Ayuda: [aqua]%s[-] │ [yellow][m][-] Mantenimiento │ [yellow][b][-] Marcos │ [yellow][Ctrl+C/q][-] Salir",
 		helpState,
 	))
 }
@@ -302,7 +364,7 @@ func (u *AppUI) cycleBorderMode() {
 func (u *AppUI) refreshHeader() {
 	modeBadge := "[black:green] " + string(u.State.Topology) + " [-:-]"
 	if u.State.IsMock {
-		modeBadge += " [black:yellow] MOCK DESIGN [-:-]"
+		modeBadge += " [black:yellow] MOCK [-:-]"
 	}
 	activeSessions := 0
 	blockers := 0
@@ -321,11 +383,10 @@ func (u *AppUI) refreshHeader() {
 		}
 	}
 	text := fmt.Sprintf(
-		" Modo: %s │ Host: [white::b]%s[-::-] │ Cluster: [aqua]%s[-] │ Ver: [green]%s[-]\n"+
-			" ORACLE_HOME: %s (%s) │ Marcos: [yellow]%s[-]\n"+
-			" Estado: [green]%d Inst OPEN[-] │ [aqua]%d PDBs[-] │ [yellow]%d Sesiones[-] ([red]%d Locks[-]) │ [red]%d Inválidos[-] │ [red]%d Alertas ORA-[-]",
-		modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion,
-		u.State.OracleHome, u.State.OracleOwner, u.State.BorderMode,
+		" Modo: %s │ Host: [white::b]%s[-::-] │ Cluster: [aqua]%s[-] │ Ver: [green]%s[-] │ Marcos: [yellow]%s[-]\n"+
+			" HOME: %s (%s) │ [green]%d Inst OPEN[-] │ [aqua]%d PDBs[-] │ [yellow]%d Sesiones[-] ([red]%d Locks[-]) │ [red]%d Inválidos[-] │ [red]%d Alertas[-]",
+		modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.State.BorderMode,
+		u.State.OracleHome, u.State.OracleOwner,
 		len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
 	)
 	u.Header.SetText(text)
@@ -359,7 +420,7 @@ func (u *AppUI) rebuildContentViews() {
 // View 1: Cluster, Nodes, Instances & PDBs
 func (u *AppUI) buildOverviewPage() tview.Primitive {
 	nodesTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	nodesTbl.SetBorder(true).SetTitle(" [Ventana 1/3] NODOS DEL CLUSTER & DAEMONS (←/→ Cambiar Ventana │ Enter = Acciones) ")
+	nodesTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] NODOS DEL CLUSTER & DAEMONS", "←/→ Ventana │ Enter = Acciones"))
 	headers := []string{"NODO", "ESTADO", "ROL", "CRS", "CSSD", "EVMD", "ASM", "VIP", "INTERCONNECT"}
 	for c, h := range headers {
 		nodesTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -426,7 +487,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 	})
 
 	instTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	instTbl.SetBorder(true).SetTitle(" [Ventana 2/3] INSTANCIAS DE BASE DE DATOS & DATA GUARD (←/→ Ventana │ Enter = Start/Stop) ")
+	instTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] INSTANCIAS DE BASE DE DATOS & DATA GUARD", "←/→ Ventana │ Enter = Start/Stop"))
 	iHeaders := []string{"INST", "DB_NAME", "NODO", "ESTADO", "OPEN_MODE", "FLASHBACK", "SGA/PGA", "FRA_USO", "DG_LAG", "UPTIME"}
 	for c, h := range iHeaders {
 		instTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -454,7 +515,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 	})
 
 	pdbTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	pdbTbl.SetBorder(true).SetTitle(" [Ventana 3/3] PLUGGABLE DATABASES - PDBs (←/→ Ventana │ Enter = Abrir/Cerrar PDB) ")
+	pdbTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] PLUGGABLE DATABASES - PDBs", "←/→ Ventana │ Enter = Abrir/Cerrar"))
 	pHeaders := []string{"CON_ID", "PDB_NAME", "OPEN_MODE", "RESTRICTED", "TAMANO_GB", "INSTANCIAS"}
 	for c, h := range pHeaders {
 		pdbTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -494,15 +555,15 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 	u.viewFocusables["overview"] = []tview.Primitive{nodesTbl, instTbl, pdbTbl}
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(nodesTbl, 7, 0, true).
-		AddItem(instTbl, 7, 0, false).
+		AddItem(nodesTbl, 6, 0, true).
+		AddItem(instTbl, 6, 0, false).
 		AddItem(pdbTbl, 0, 1, false)
 }
 
 // View 2: Connected Users & Sessions
 func (u *AppUI) buildSessionsPage() tview.Primitive {
 	tbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	tbl.SetBorder(true).SetTitle(" USUARIOS CONECTADOS & SESIONES (gv$session) (← Volver al Menu │ Enter = Menu Sesion) ")
+	tbl.SetBorder(true).SetTitle(u.winTitle("USUARIOS CONECTADOS & SESIONES (gv$session)", "← Menu │ Enter = Acciones"))
 
 	headers := []string{"INST", "SID,SER#", "USUARIO", "ESTADO", "MAQUINA", "PROGRAMA", "SQL_ID", "EVENTO DE ESPERA", "TIEMPO", "BLOQUEO", "PGA_MB"}
 	for c, h := range headers {
@@ -580,13 +641,13 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tbl, 0, 1, true).
-		AddItem(sqlPreview, 5, 0, false)
+		AddItem(sqlPreview, 4, 0, false)
 }
 
 // View 3: Tablespaces & Datafiles
 func (u *AppUI) buildTablespacesPage() tview.Primitive {
 	tbsTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	tbsTbl.SetBorder(true).SetTitle(" [Ventana 1/2] ESTADO DE TABLESPACES (←/→ Cambiar Ventana │ Enter = Mantenimiento) ")
+	tbsTbl.SetBorder(true).SetTitle(u.winTitle("[1/2] ESTADO DE TABLESPACES", "←/→ Ventana │ Enter = Mantenimiento"))
 
 	headers := []string{"TABLESPACE", "TIPO", "ESTADO", "TOTAL_MB", "USADO_MB", "LIBRE_MB", "USO % (BARRA)", "AUTOEXTEND", "DATAFILES"}
 	for c, h := range headers {
@@ -608,7 +669,7 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 	ensureSelectableRow(tbsTbl, len(headers), "Sin tablespaces detectados")
 
 	dfTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	dfTbl.SetBorder(true).SetTitle(" [Ventana 2/2] DATAFILES ASOCIADOS (dba_data_files) (←/→ Cambiar Ventana) ")
+	dfTbl.SetBorder(true).SetTitle(u.winTitle("[2/2] DATAFILES ASOCIADOS (dba_data_files)", "←/→ Cambiar Ventana"))
 	dHeaders := []string{"FILE_ID", "TABLESPACE", "RUTA / ASM FILE", "TAMANO_MB", "MAX_MB", "AUTOEXTEND", "ESTADO"}
 	for c, h := range dHeaders {
 		dfTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -665,13 +726,13 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tbsTbl, 0, 2, true).
-		AddItem(dfTbl, 8, 0, false)
+		AddItem(dfTbl, 7, 0, false)
 }
 
 // View 4: Tables, Segments & Invalid Objects
 func (u *AppUI) buildTablesPage() tview.Primitive {
 	segTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	segTbl.SetBorder(true).SetTitle(" [Ventana 1/2] TABLAS & SEGMENTOS PRINCIPALES (←/→ Ventana │ Enter = Mantenimiento) ")
+	segTbl.SetBorder(true).SetTitle(u.winTitle("[1/2] TABLAS & SEGMENTOS PRINCIPALES", "←/→ Ventana │ Enter = Mantenimiento"))
 
 	headers := []string{"ESQUEMA", "NOMBRE SEGMENTO", "TIPO", "TABLESPACE", "TAMANO_MB", "NUM_FILAS", "ULT_ANALISIS", "ESTADISTICAS", "FRAGMENTACION"}
 	for c, h := range headers {
@@ -693,7 +754,7 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 	ensureSelectableRow(segTbl, len(headers), "Sin segmentos de usuario detectados")
 
 	invTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	invTbl.SetBorder(true).SetTitle(" [Ventana 2/2] OBJETOS INVALIDOS (dba_objects) (←/→ Ventana │ Enter = Recompilar) ")
+	invTbl.SetBorder(true).SetTitle(u.winTitle("[2/2] OBJETOS INVALIDOS (dba_objects)", "←/→ Ventana │ Enter = Recompilar"))
 	iHeaders := []string{"ESQUEMA", "OBJETO", "TIPO", "ESTADO", "ULTIMO_DDL"}
 	for c, h := range iHeaders {
 		invTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -775,13 +836,13 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(segTbl, 0, 2, true).
-		AddItem(invTbl, 7, 0, false)
+		AddItem(invTbl, 6, 0, false)
 }
 
 // View 5: ASM Storage & Listeners
 func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	asmTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	asmTbl.SetBorder(true).SetTitle(" [Ventana 1/2] ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup) (←/→ Cambiar Ventana) ")
+	asmTbl.SetBorder(true).SetTitle(u.winTitle("[1/2] ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup)", "←/→ Ventana"))
 	aHeaders := []string{"DISKGROUP", "ESTADO", "REDUNDANCIA", "TOTAL_MB", "LIBRE_MB", "USABLE_MB", "USO % (BARRA)", "DISCOS_OFFLINE"}
 	for c, h := range aHeaders {
 		asmTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -804,7 +865,7 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	ensureSelectableRow(asmTbl, len(aHeaders), "Sin Diskgroups ASM (Almacenamiento en Filesystem)")
 
 	lsnrTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	lsnrTbl.SetBorder(true).SetTitle(" [Ventana 2/2] RED ORACLE: LISTENERS LOCALES & SCAN (←/→ Ventana │ Enter = Start/Stop/Reload) ")
+	lsnrTbl.SetBorder(true).SetTitle(u.winTitle("[2/2] RED ORACLE: LISTENERS LOCALES & SCAN", "←/→ Ventana │ Enter = Start/Stop"))
 	lHeaders := []string{"LISTENER", "TIPO", "NODO", "ESTADO", "ENDPOINT", "SERVICIOS_REG"}
 	for c, h := range lHeaders {
 		lsnrTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -847,14 +908,14 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	u.viewFocusables["asm_net"] = []tview.Primitive{asmTbl, lsnrTbl}
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(asmTbl, 8, 0, true).
+		AddItem(asmTbl, 7, 0, true).
 		AddItem(lsnrTbl, 0, 1, false)
 }
 
 // View 6: RMAN Backups, Flashback Restore Points & Data Guard
 func (u *AppUI) buildRMANDGPage() tview.Primitive {
 	rmanTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	rmanTbl.SetBorder(true).SetTitle(" [Ventana 1/3] HISTORIAL DE BACKUPS RMAN (←/→ Ventana │ Enter = Lanzar Backup) ")
+	rmanTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] HISTORIAL DE BACKUPS RMAN", "←/→ Ventana │ Enter = Lanzar Backup"))
 	rHeaders := []string{"SESSION_KEY", "TIPO BACKUP", "ESTADO", "INICIO", "DURACION", "TAMANO_GB", "DISPOSITIVO"}
 	for c, h := range rHeaders {
 		rmanTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -914,7 +975,7 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 	})
 
 	rpTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	rpTbl.SetBorder(true).SetTitle(" [Ventana 2/3] FLASHBACK & PUNTOS DE RESTAURACION (v$restore_point) (←/→ Ventana) ")
+	rpTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] FLASHBACK & PUNTOS DE RESTAURACION (v$restore_point)", "←/→ Ventana"))
 	rpHeaders := []string{"NOMBRE RESTORE POINT", "SCN", "FECHA CREACION", "GARANTIZADO", "USO EN FRA"}
 	for c, h := range rpHeaders {
 		rpTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -930,7 +991,7 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 	ensureSelectableRow(rpTbl, len(rpHeaders), "Sin puntos de restauracion activos")
 
 	dgTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	dgTbl.SetBorder(true).SetTitle(" [Ventana 3/3] DATA GUARD STANDBY & REPLICACION (v$dataguard_stats) (←/→ Ventana) ")
+	dgTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] DATA GUARD STANDBY & REPLICACION (v$dataguard_stats)", "←/→ Ventana"))
 	dgHeaders := []string{"STANDBY DB", "ROL", "HOST DESTINO", "OPEN_MODE", "TRANSPORT_LAG", "APPLY_LAG", "ESTADO MRP0", "SWITCHOVER"}
 	for c, h := range dgHeaders {
 		dgTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -952,14 +1013,14 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(rmanTbl, 0, 2, true).
-		AddItem(rpTbl, 6, 0, false).
-		AddItem(dgTbl, 6, 0, false)
+		AddItem(rpTbl, 5, 0, false).
+		AddItem(dgTbl, 5, 0, false)
 }
 
 // View 7: Alert Log & ORA- Errors
 func (u *AppUI) buildAlertLogPage() tview.Primitive {
 	alertTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	alertTbl.SetBorder(true).SetTitle(" VISOR DE ALERT LOG & ERRORES ORA- (← Volver al Menu │ Enter = Accion Correctiva / ADRCI) ")
+	alertTbl.SetBorder(true).SetTitle(u.winTitle("VISOR DE ALERT LOG & ERRORES ORA-", "← Menu │ Enter = Accion Correctiva / ADRCI"))
 	headers := []string{"TIMESTAMP", "INSTANCIA", "SEVERIDAD", "CODIGO", "MENSAJE / DIAGNOSTICO"}
 	for c, h := range headers {
 		alertTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -1004,18 +1065,21 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 	return alertTbl
 }
 
-// View 8: Dedicated Maintenance Center
+// View 8: Dedicated Maintenance Center (Single-line items so all tasks fit without scrolling)
 func (u *AppUI) buildMaintenancePage() tview.Primitive {
 	list := tview.NewList().
-		ShowSecondaryText(u.ShowMenuHelp).
+		ShowSecondaryText(false).
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(tcell.ColorNavy)
 	list.SetBorder(true).SetTitle(u.winTitle("══ CENTRO DE TAREAS DE MANTENIMIENTO GUIADO ══", "← Menu │ ↑↓ + Enter │ F1 Ayuda"))
 
 	actions := u.getAllMaintenanceActions()
 	for idx, act := range actions {
-		shortcut := rune('a' + idx)
-		list.AddItem(act.title, "   "+act.subtitle, shortcut, act.handler)
+		line := fmt.Sprintf(" [%d] %s", idx+1, act.title)
+		if u.ShowMenuHelp {
+			line = fmt.Sprintf(" [%d] %-56s [gray]│ %s[-]", idx+1, act.title, act.subtitle)
+		}
+		list.AddItem(line, "", 0, act.handler)
 	}
 
 	u.viewFocusables["maintenance"] = []tview.Primitive{list}
@@ -1032,8 +1096,8 @@ type menuAction struct {
 func (u *AppUI) getAllMaintenanceActions() []menuAction {
 	return []menuAction{
 		{
-			"[Instancia/BD] Parada / Arranque Seguro de Instancia o RAC",
-			"Ejecuta SHUTDOWN IMMEDIATE / srvctl stop con pre-chequeo de transacciones y PMON",
+			"[Instancia/BD] Parada / Arranque Seguro Instancia o RAC",
+			"SHUTDOWN IMMEDIATE / srvctl stop con chequeo PMON",
 			func() {
 				if len(u.State.Instances) > 0 {
 					u.showInstanceMenu(0, u.State.Instances[0])
@@ -1041,8 +1105,8 @@ func (u *AppUI) getAllMaintenanceActions() []menuAction {
 			},
 		},
 		{
-			"[Cluster RAC] Aislar / Drenar Nodo del Cluster (Graceful Node Drain)",
-			"Reubica servicios sin corte -> Para instancias locales -> Detiene pila CRS",
+			"[Cluster RAC] Aislar / Drenar Nodo (Graceful Node Drain)",
+			"Reubica servicios -> Para instancia -> Detiene CRS",
 			func() {
 				u.runSimulatedTask(
 					"Asistente de Drenado Seguro de Nodo (ora-rac01)",
@@ -1058,18 +1122,18 @@ func (u *AppUI) getAllMaintenanceActions() []menuAction {
 			},
 		},
 		{
-			"[Tablespaces] Ampliar Tablespace Critico (>90%) / Anadir Datafile",
-			"Detecta tablespaces al limite (ERP_DATA_TBS 93%) y agrega datafile en +DATA",
+			"[Tablespaces] Ampliar Tablespace Critico / +Datafile",
+			"Agrega datafile en +DATA a tablespaces >90%",
 			func() { u.switchViewAndFocus("tablespaces") },
 		},
 		{
-			"[Tablas & Stats] Actualizar Estadisticas Stale & Compactar Tablas",
-			"Ejecuta DBMS_STATS.GATHER_TABLE_STATS y SHRINK SPACE en tablas fragmentadas",
+			"[Tablas & Stats] Actualizar DBMS_STATS & Shrink Tablas",
+			"GATHER_TABLE_STATS y SHRINK SPACE CASCADE online",
 			func() { u.switchViewAndFocus("tables") },
 		},
 		{
-			"[Objetos] Recompilar Objetos Invalidos (utlrp.sql / COMPILE_SCHEMA)",
-			"Recompila paquetes, vistas y triggers en estado INVALID",
+			"[Objetos] Recompilar Objetos Invalidos (UTL_RECOMP)",
+			"Recompila paquetes, vistas y triggers en INVALID",
 			func() {
 				u.runSimulatedTask(
 					"Recompilacion Global de Objetos Invalidos",
@@ -1086,18 +1150,18 @@ func (u *AppUI) getAllMaintenanceActions() []menuAction {
 			},
 		},
 		{
-			"[Usuarios/Locks] Analizar y Liberar Sesiones Bloqueantes (Row Lock Contention)",
-			"Inspecciona bloqueos TX/TM en gv$session y permite matar la sesion bloqueadora",
+			"[Usuarios/Locks] Analizar y Matar Sesiones Bloqueantes",
+			"Inspecciona bloqueos TX/TM y ejecuta KILL SESSION",
 			func() { u.switchViewAndFocus("sessions") },
 		},
 		{
-			"[RMAN/Flashback] Backup Archivelog + Crear Punto de Restauracion Garantizado",
-			"Ejecuta backup previo a mantenimiento y crea GRP (Guaranteed Restore Point)",
+			"[RMAN/Flashback] Backup Archivelog + Crear Restore Point",
+			"Backup previo y Guaranteed Restore Point (GRP)",
 			func() { u.switchViewAndFocus("rman_dg") },
 		},
 		{
-			"[Alert Log/ADR] Inspeccionar Errores ORA- y Purgar Trazas ADRCI",
-			"Analiza el Alert Log y libera espacio en /u01/app/oracle/diag",
+			"[Alert Log/ADR] Inspeccionar Errores ORA- & Purgar ADRCI",
+			"Analiza el Alert Log y ejecuta adrci purge",
 			func() { u.switchViewAndFocus("alert_log") },
 		},
 	}
@@ -1147,38 +1211,51 @@ func (u *AppUI) showGlobalMaintenancePopup() {
 	u.showActionMenuModal(" ══ MENU RAPIDO DE MANTENIMIENTO [F1 = Mostrar/Ocultar Ayuda] ══ ", u.getAllMaintenanceActions())
 }
 
-// showActionMenuModal displays a double-bordered Unicode popup window with arrow-key selectable options.
+// showActionMenuModal displays a double-bordered Unicode popup window where all options
+// fit on screen simultaneously without horizontal or vertical scrolling.
 func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 	list := tview.NewList().
-		ShowSecondaryText(u.ShowMenuHelp).
+		ShowSecondaryText(false).
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(tcell.ColorNavy).
 		SetSelectedTextColor(tcell.ColorWhite)
 	list.SetBorder(true).SetTitle(title)
 	u.activeModalList = list
 
+	maxWidth := len(title) + 6
 	for i, act := range actions {
 		fn := act.handler
 		actTitle := act.title
-		list.AddItem(fmt.Sprintf("▸ [%d] %s", i+1, actTitle), "      "+act.subtitle, 0, func() {
+		line := fmt.Sprintf(" ▸ [%d] %s", i+1, actTitle)
+		if u.ShowMenuHelp && act.subtitle != "" {
+			line = fmt.Sprintf(" ▸ [%d] %-52s [gray]│ %s[-]", i+1, actTitle, act.subtitle)
+		}
+		plainLen := len(actTitle) + len(act.subtitle) + 18
+		if plainLen > maxWidth {
+			maxWidth = plainLen
+		}
+		list.AddItem(line, "", 0, func() {
 			u.Pages.RemovePage("modal")
 			u.showConfirmModal(actTitle, fn)
 		})
 	}
-	list.AddItem("▸ [F1] Mostrar / Ocultar Ayuda en este Menu", "      Alterna las descripciones de comandos SQL/SO", 0, func() {
-		u.ShowMenuHelp = !u.ShowMenuHelp
-		list.ShowSecondaryText(u.ShowMenuHelp)
-		u.NavList.ShowSecondaryText(u.ShowMenuHelp)
-		u.refreshFooter()
+	list.AddItem(" ▸ [F1] Mostrar / Ocultar Ayuda en este Menu", "", 0, func() {
+		u.Pages.RemovePage("modal")
+		u.toggleMenuHelp()
+		u.showActionMenuModal(title, actions)
 	})
-	list.AddItem("▸ [Esc / ←] Cancelar / Cerrar Ventana", "      Volver a la pantalla anterior", 0, func() {
+	list.AddItem(" ▸ [Esc / ←] Cancelar / Cerrar Ventana", "", 0, func() {
 		u.Pages.RemovePage("modal")
 		u.focusFirstRightWindow()
 	})
 
-	modalHeight := 20
-	if !u.ShowMenuHelp {
-		modalHeight = len(actions) + 5
+	// Exact height so 100% of items fit inside the frame with zero vertical scrolling
+	modalHeight := len(actions) + 4
+	if maxWidth < 68 {
+		maxWidth = 68
+	}
+	if maxWidth > 114 {
+		maxWidth = 114
 	}
 
 	modalFlex := tview.NewFlex().
@@ -1186,7 +1263,7 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
 			AddItem(list, modalHeight, 1, true).
-			AddItem(nil, 0, 1, false), 82, 1, true).
+			AddItem(nil, 0, 1, false), maxWidth, 1, true).
 		AddItem(nil, 0, 1, false)
 
 	u.Pages.AddPage("modal", modalFlex, true, true)
