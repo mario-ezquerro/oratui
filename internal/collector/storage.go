@@ -28,23 +28,35 @@ SELECT
     t.tablespace_name,
     t.contents,
     t.status,
-    ROUND(NVL(df.total_mb, 0)),
-    ROUND(NVL(df.total_mb, 0) - NVL(fs.free_mb, 0)),
-    ROUND(NVL(fs.free_mb, 0)),
-    ROUND((NVL(df.total_mb, 0) - NVL(fs.free_mb, 0)) * 100 / NULLIF(df.total_mb, 0), 1),
+    ROUND(NVL(df.alloc_mb, 0)),
+    ROUND(NVL(df.max_mb, 0)),
+    ROUND(CASE
+        WHEN t.contents = 'TEMPORARY' THEN NVL(tu.used_mb, 0)
+        ELSE GREATEST(NVL(df.alloc_mb, 0) - NVL(fs.free_mb, 0), 0)
+    END),
+    ROUND(CASE
+        WHEN t.contents = 'TEMPORARY' THEN GREATEST(NVL(df.max_mb, 0) - NVL(tu.used_mb, 0), 0)
+        ELSE GREATEST(NVL(df.max_mb, 0) - GREATEST(NVL(df.alloc_mb, 0) - NVL(fs.free_mb, 0), 0), 0)
+    END),
+    ROUND(CASE
+        WHEN t.contents = 'TEMPORARY' THEN NVL(tu.used_mb, 0) * 100 / NULLIF(df.max_mb, 0)
+        ELSE GREATEST(NVL(df.alloc_mb, 0) - NVL(fs.free_mb, 0), 0) * 100 / NULLIF(df.max_mb, 0)
+    END, 1),
     NVL(df.autoext, 'NO'),
     NVL(df.file_cnt, 0)
 FROM dba_tablespaces t
 LEFT JOIN (
     SELECT tablespace_name,
-           SUM(bytes)/1024/1024 AS total_mb,
+           SUM(bytes)/1024/1024 AS alloc_mb,
+           SUM(CASE WHEN autoextensible = 'YES' THEN GREATEST(bytes, maxbytes) ELSE bytes END)/1024/1024 AS max_mb,
            MAX(autoextensible) AS autoext,
            COUNT(*) AS file_cnt
     FROM dba_data_files
     GROUP BY tablespace_name
     UNION ALL
     SELECT tablespace_name,
-           SUM(bytes)/1024/1024 AS total_mb,
+           SUM(bytes)/1024/1024 AS alloc_mb,
+           SUM(CASE WHEN autoextensible = 'YES' THEN GREATEST(bytes, maxbytes) ELSE bytes END)/1024/1024 AS max_mb,
            MAX(autoextensible) AS autoext,
            COUNT(*) AS file_cnt
     FROM dba_temp_files
@@ -55,7 +67,12 @@ LEFT JOIN (
     FROM dba_free_space
     GROUP BY tablespace_name
 ) fs ON fs.tablespace_name = t.tablespace_name
-ORDER BY 7 DESC NULLS LAST;
+LEFT JOIN (
+    SELECT tablespace_name, SUM(bytes_used)/1024/1024 AS used_mb
+    FROM v$temp_extent_pool
+    GROUP BY tablespace_name
+) tu ON tu.tablespace_name = t.tablespace_name
+ORDER BY 8 DESC NULLS LAST;
 `
 
 const sqlDatafilesQuery = `
@@ -65,7 +82,7 @@ SELECT * FROM (
         file_name,
         tablespace_name,
         ROUND(bytes/1024/1024),
-        ROUND(GREATEST(bytes, maxbytes)/1024/1024),
+        ROUND(CASE WHEN autoextensible = 'YES' THEN GREATEST(bytes, maxbytes) ELSE bytes END / 1024 / 1024),
         autoextensible,
         online_status
     FROM dba_data_files
@@ -140,23 +157,25 @@ func ParseASMDiskgroupRows(rows [][]string) []model.ASMDiskgroup {
 func ParseTablespaceRows(rows [][]string) []model.TablespaceInfo {
 	var list []model.TablespaceInfo
 	for _, r := range rows {
-		if len(r) < 9 {
+		if len(r) < 10 {
 			continue
 		}
-		totalMB, _ := strconv.Atoi(r[3])
-		usedMB, _ := strconv.Atoi(r[4])
-		freeMB, _ := strconv.Atoi(r[5])
-		usedPct, _ := strconv.ParseFloat(r[6], 64)
-		files, _ := strconv.Atoi(r[8])
+		allocMB, _ := strconv.Atoi(r[3])
+		totalMB, _ := strconv.Atoi(r[4])
+		usedMB, _ := strconv.Atoi(r[5])
+		freeMB, _ := strconv.Atoi(r[6])
+		usedPct, _ := strconv.ParseFloat(r[7], 64)
+		files, _ := strconv.Atoi(r[9])
 		list = append(list, model.TablespaceInfo{
 			Name:       r[0],
 			Type:       r[1],
 			Status:     r[2],
+			AllocMB:    allocMB,
 			TotalMB:    totalMB,
 			UsedMB:     usedMB,
 			FreeMB:     freeMB,
 			UsedPct:    usedPct,
-			AutoExtend: r[7],
+			AutoExtend: r[8],
 			Datafiles:  files,
 		})
 	}

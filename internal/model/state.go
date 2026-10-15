@@ -104,9 +104,10 @@ type TablespaceInfo struct {
 	Name       string
 	Type       string // PERMANENT, UNDO, TEMPORARY
 	Status     string // ONLINE, OFFLINE, READ ONLY
-	TotalMB    int
-	UsedMB     int
-	FreeMB     int
+	AllocMB    int    // Currently allocated size on disk (SUM(bytes))
+	TotalMB    int    // Maximum capacity considering AUTOEXTEND (TOTAL_MAX)
+	UsedMB     int    // Actual space consumed (AllocMB - FreeAllocMB)
+	FreeMB     int    // Real remaining free capacity (TotalMB - UsedMB)
 	UsedPct    float64
 	AutoExtend string // YES, NO
 	Datafiles  int

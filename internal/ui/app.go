@@ -647,9 +647,9 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 // View 3: Tablespaces & Datafiles
 func (u *AppUI) buildTablespacesPage() tview.Primitive {
 	tbsTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	tbsTbl.SetBorder(true).SetTitle(u.winTitle("[1/2] ESTADO DE TABLESPACES", "←/→ Ventana │ Enter = Mantenimiento"))
+	tbsTbl.SetBorder(true).SetTitle(u.winTitle("[1/2] ESTADO DE TABLESPACES (Capacidad Real con AUTOEXTEND)", "←/→ Ventana │ Enter = Mantenimiento"))
 
-	headers := []string{"TABLESPACE", "TIPO", "ESTADO", "TOTAL_MB", "USADO_MB", "LIBRE_MB", "USO % (BARRA)", "AUTOEXTEND", "DATAFILES"}
+	headers := []string{"TABLESPACE", "TIPO", "ESTADO", "ASIG_MB", "TOTAL_MAX", "USADO_MB", "LIBRE_MB", "USO REAL %", "AUTOEXT", "FILES"}
 	for c, h := range headers {
 		tbsTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
 	}
@@ -659,12 +659,13 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 		tbsTbl.SetCell(r, 0, tview.NewTableCell("[white::b]"+ts.Name))
 		tbsTbl.SetCell(r, 1, tview.NewTableCell(ts.Type))
 		tbsTbl.SetCell(r, 2, tview.NewTableCell(ColorStatus(ts.Status)))
-		tbsTbl.SetCell(r, 3, tview.NewTableCell(fmt.Sprintf("%d MB", ts.TotalMB)))
-		tbsTbl.SetCell(r, 4, tview.NewTableCell(fmt.Sprintf("%d MB", ts.UsedMB)))
-		tbsTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%d MB", ts.FreeMB)))
-		tbsTbl.SetCell(r, 6, tview.NewTableCell(ASCIIBar(ts.UsedPct, 12, true)))
-		tbsTbl.SetCell(r, 7, tview.NewTableCell(ts.AutoExtend))
-		tbsTbl.SetCell(r, 8, tview.NewTableCell(fmt.Sprintf("%d", ts.Datafiles)))
+		tbsTbl.SetCell(r, 3, tview.NewTableCell(fmt.Sprintf("%d MB", ts.AllocMB)))
+		tbsTbl.SetCell(r, 4, tview.NewTableCell(fmt.Sprintf("%d MB", ts.TotalMB)))
+		tbsTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%d MB", ts.UsedMB)))
+		tbsTbl.SetCell(r, 6, tview.NewTableCell(fmt.Sprintf("%d MB", ts.FreeMB)))
+		tbsTbl.SetCell(r, 7, tview.NewTableCell(ASCIIBar(ts.UsedPct, 12, true)))
+		tbsTbl.SetCell(r, 8, tview.NewTableCell(ColorStatus(ts.AutoExtend)))
+		tbsTbl.SetCell(r, 9, tview.NewTableCell(fmt.Sprintf("%d", ts.Datafiles)))
 	}
 	ensureSelectableRow(tbsTbl, len(headers), "Sin tablespaces detectados")
 
@@ -692,18 +693,19 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 		}
 		ts := u.State.Tablespaces[row-1]
 		u.showActionMenuModal(
-			fmt.Sprintf(" ══ MANTENIMIENTO DE TABLESPACE: %s (%.1f%% Usado) ══ ", ts.Name, ts.UsedPct),
+			fmt.Sprintf(" ══ MANTENIMIENTO DE TABLESPACE: %s (%.1f%% Usado de %d MB Max) ══ ", ts.Name, ts.UsedPct, ts.TotalMB),
 			[]menuAction{
-				{"Anadir Nuevo Datafile (+32 GB ASM)", fmt.Sprintf("ALTER TABLESPACE %s ADD DATAFILE '+DATA' SIZE 32G AUTOEXTEND ON", ts.Name), func() {
+				{"Anadir Nuevo Datafile (+32 GB ASM)", fmt.Sprintf("ALTER TABLESPACE %s ADD DATAFILE '+DATA' SIZE 1G AUTOEXTEND ON MAXSIZE 32G", ts.Name), func() {
 					u.runSimulatedTask(
 						"Anadir Datafile a "+ts.Name,
 						[]string{
-							fmt.Sprintf("[SQL] ALTER TABLESPACE %s ADD DATAFILE '+DATA' SIZE 32768M AUTOEXTEND ON NEXT 1024M MAXSIZE UNLIMITED;", ts.Name),
-							"[OK] Datafile creado y tablespace ampliado en +32 GB.",
+							fmt.Sprintf("[SQL] ALTER TABLESPACE %s ADD DATAFILE '+DATA' SIZE 1024M AUTOEXTEND ON NEXT 1024M MAXSIZE 32768M;", ts.Name),
+							"[OK] Datafile creado y capacidad maxima ampliada en +32 GB.",
 						},
 						func() {
+							u.State.Tablespaces[row-1].AllocMB += 1024
 							u.State.Tablespaces[row-1].TotalMB += 32768
-							u.State.Tablespaces[row-1].FreeMB += 32768
+							u.State.Tablespaces[row-1].FreeMB = u.State.Tablespaces[row-1].TotalMB - u.State.Tablespaces[row-1].UsedMB
 							u.State.Tablespaces[row-1].Datafiles++
 							u.State.Tablespaces[row-1].UsedPct = float64(u.State.Tablespaces[row-1].UsedMB) * 100.0 / float64(u.State.Tablespaces[row-1].TotalMB)
 							u.rebuildContentViews()

@@ -45,3 +45,18 @@ func TestParsePipeDelimitedSQLPlus(t *testing.T) {
 		t.Fatalf("unexpected parsed instance: %+v", insts)
 	}
 }
+
+func TestParseTablespaceRowsAutoextend(t *testing.T) {
+	raw := `
+USERS|PERMANENT|ONLINE|19456|32768|18350|14418|56.0|YES|1
+`
+	rows := executor.ParsePipeDelimitedOutput(raw)
+	tbs := ParseTablespaceRows(rows)
+	if len(tbs) != 1 {
+		t.Fatalf("expected 1 tablespace, got %d", len(tbs))
+	}
+	if tbs[0].AllocMB != 19456 || tbs[0].TotalMB != 32768 || tbs[0].UsedMB != 18350 || tbs[0].FreeMB != 14418 || tbs[0].UsedPct != 56.0 {
+		t.Fatalf("unexpected tablespace calculation: %+v", tbs[0])
+	}
+}
+
