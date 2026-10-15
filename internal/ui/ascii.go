@@ -4,11 +4,169 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/mario/ora-tui/internal/model"
 	"github.com/rivo/tview"
 )
 
 var currentBorderStyle = model.BorderMixedUnicode
+
+type ColorThemeName string
+
+const (
+	ThemeNorton ColorThemeName = "NORTON COMMANDER"
+	ThemeTurboC ColorThemeName = "BORLAND TURBO C"
+	ThemeDark   ColorThemeName = "TERMINAL OSCURO"
+)
+
+type ColorPalette struct {
+	Name            ColorThemeName
+	PanelBg         tcell.Color
+	PanelFg         tcell.Color
+	NavBg           tcell.Color
+	NavFg           tcell.Color
+	NavUnfocusedBg  tcell.Color
+	NavUnfocusedFg  tcell.Color
+	HeaderBg        tcell.Color
+	FooterBg        tcell.Color
+	LogBg           tcell.Color
+	ActiveBorder    tcell.Color
+	ActiveTitle     tcell.Color
+	InactiveBorder  tcell.Color
+	InactiveTitle   tcell.Color
+	CursorBg        tcell.Color
+	CursorFg        tcell.Color
+	ModalBg         tcell.Color
+	ModalFg         tcell.Color
+	ModalBorder     tcell.Color
+	ModalTitle      tcell.Color
+	ModalCursorBg   tcell.Color
+	ModalCursorFg   tcell.Color
+	ConfirmBg       tcell.Color
+	ConfirmFg       tcell.Color
+	ConfirmBorder   tcell.Color
+	ConfirmCursorBg tcell.Color
+	ConfirmCursorFg tcell.Color
+}
+
+var currentPalette = GetColorPalette(ThemeNorton)
+
+func GetColorPalette(theme ColorThemeName) ColorPalette {
+	switch theme {
+	case ThemeTurboC:
+		return ColorPalette{
+			Name:            ThemeTurboC,
+			PanelBg:         tcell.ColorNavy,
+			PanelFg:         tcell.ColorWhite,
+			NavBg:           tcell.ColorSilver,
+			NavFg:           tcell.ColorBlack,
+			NavUnfocusedBg:  tcell.ColorTeal,
+			NavUnfocusedFg:  tcell.ColorYellow,
+			HeaderBg:        tcell.ColorTeal,
+			FooterBg:        tcell.ColorTeal,
+			LogBg:           tcell.ColorTeal,
+			ActiveBorder:    tcell.ColorYellow,
+			ActiveTitle:     tcell.ColorYellow,
+			InactiveBorder:  tcell.ColorSilver,
+			InactiveTitle:   tcell.ColorWhite,
+			CursorBg:        tcell.ColorYellow,
+			CursorFg:        tcell.ColorBlack,
+			ModalBg:         tcell.ColorSilver,
+			ModalFg:         tcell.ColorBlack,
+			ModalBorder:     tcell.ColorWhite,
+			ModalTitle:      tcell.ColorMaroon,
+			ModalCursorBg:   tcell.ColorTeal,
+			ModalCursorFg:   tcell.ColorYellow,
+			ConfirmBg:       tcell.ColorMaroon,
+			ConfirmFg:       tcell.ColorWhite,
+			ConfirmBorder:   tcell.ColorYellow,
+			ConfirmCursorBg: tcell.ColorYellow,
+			ConfirmCursorFg: tcell.ColorBlack,
+		}
+	case ThemeDark:
+		return ColorPalette{
+			Name:            ThemeDark,
+			PanelBg:         tcell.ColorBlack,
+			PanelFg:         tcell.ColorWhite,
+			NavBg:           tcell.ColorBlack,
+			NavFg:           tcell.ColorWhite,
+			NavUnfocusedBg:  tcell.ColorNavy,
+			NavUnfocusedFg:  tcell.ColorWhite,
+			HeaderBg:        tcell.ColorBlack,
+			FooterBg:        tcell.ColorBlack,
+			LogBg:           tcell.ColorBlack,
+			ActiveBorder:    tcell.ColorAqua,
+			ActiveTitle:     tcell.ColorAqua,
+			InactiveBorder:  tcell.ColorGray,
+			InactiveTitle:   tcell.ColorWhite,
+			CursorBg:        tcell.ColorAqua,
+			CursorFg:        tcell.ColorBlack,
+			ModalBg:         tcell.ColorNavy,
+			ModalFg:         tcell.ColorWhite,
+			ModalBorder:     tcell.ColorAqua,
+			ModalTitle:      tcell.ColorYellow,
+			ModalCursorBg:   tcell.ColorAqua,
+			ModalCursorFg:   tcell.ColorBlack,
+			ConfirmBg:       tcell.ColorMaroon,
+			ConfirmFg:       tcell.ColorWhite,
+			ConfirmBorder:   tcell.ColorYellow,
+			ConfirmCursorBg: tcell.ColorYellow,
+			ConfirmCursorFg: tcell.ColorBlack,
+		}
+	default: // ThemeNorton (Classic MS-DOS Norton Commander / Turbo C Blue)
+		return ColorPalette{
+			Name:            ThemeNorton,
+			PanelBg:         tcell.ColorNavy,
+			PanelFg:         tcell.ColorWhite,
+			NavBg:           tcell.ColorNavy,
+			NavFg:           tcell.ColorWhite,
+			NavUnfocusedBg:  tcell.ColorTeal,
+			NavUnfocusedFg:  tcell.ColorYellow,
+			HeaderBg:        tcell.ColorTeal,
+			FooterBg:        tcell.ColorTeal,
+			LogBg:           tcell.ColorBlack,
+			ActiveBorder:    tcell.ColorYellow,
+			ActiveTitle:     tcell.ColorYellow,
+			InactiveBorder:  tcell.ColorAqua,
+			InactiveTitle:   tcell.ColorAqua,
+			CursorBg:        tcell.ColorAqua,
+			CursorFg:        tcell.ColorBlack,
+			ModalBg:         tcell.ColorTeal,
+			ModalFg:         tcell.ColorWhite,
+			ModalBorder:     tcell.ColorYellow,
+			ModalTitle:      tcell.ColorYellow,
+			ModalCursorBg:   tcell.ColorYellow,
+			ModalCursorFg:   tcell.ColorBlack,
+			ConfirmBg:       tcell.ColorMaroon,
+			ConfirmFg:       tcell.ColorWhite,
+			ConfirmBorder:   tcell.ColorYellow,
+			ConfirmCursorBg: tcell.ColorYellow,
+			ConfirmCursorFg: tcell.ColorBlack,
+		}
+	}
+}
+
+func ApplyColorTheme(theme ColorThemeName) ColorPalette {
+	currentPalette = GetColorPalette(theme)
+	tview.Styles.PrimitiveBackgroundColor = currentPalette.PanelBg
+	tview.Styles.ContrastBackgroundColor = currentPalette.ModalBg
+	tview.Styles.MoreContrastBackgroundColor = currentPalette.ConfirmBg
+	tview.Styles.BorderColor = currentPalette.InactiveBorder
+	tview.Styles.TitleColor = currentPalette.InactiveTitle
+	tview.Styles.PrimaryTextColor = currentPalette.PanelFg
+	return currentPalette
+}
+
+func NextColorTheme(curr ColorThemeName) ColorThemeName {
+	switch curr {
+	case ThemeNorton:
+		return ThemeTurboC
+	case ThemeTurboC:
+		return ThemeDark
+	default:
+		return ThemeNorton
+	}
+}
 
 // ApplyBorderTheme configures tview's box-drawing characters according to the selected style:
 // - BorderMixedUnicode (default): Simple border (┌ ─ ┐ │ └ ┘) for windows + Double border (╔ ═ ╗ ║ ╚ ╝) for focused windows & popup menus.
@@ -136,16 +294,16 @@ func ASCIIBar(pct float64, width int, colorize bool) string {
 	if !colorize {
 		return fmt.Sprintf("%s %5.1f%%", bar, pct)
 	}
-	color := "[green]"
+	color := "[lime::b]"
 	if pct >= 90.0 {
-		color = "[red]"
+		color = "[#ff5555::b]"
 	} else if pct >= 80.0 {
-		color = "[yellow]"
+		color = "[yellow::b]"
 	}
-	return fmt.Sprintf("%s%s %5.1f%%[-]", color, bar, pct)
+	return fmt.Sprintf("%s%s %5.1f%%[-::-]", color, bar, pct)
 }
 
-// ColorStatus formats status strings with tview colors.
+// ColorStatus formats status strings with high-contrast colors suitable for both Navy Blue and Dark backgrounds.
 func ColorStatus(status string) string {
 	u := strings.ToUpper(status)
 	switch {
@@ -155,12 +313,12 @@ func ColorStatus(status string) string {
 		strings.Contains(u, "HIGH") || strings.Contains(u, "DRAINED") ||
 		strings.Contains(u, "FAILED") || strings.Contains(u, "CRITICAL") ||
 		strings.Contains(u, "ORA-"):
-		return "[red]" + status + "[-]"
+		return "[#ff5555::b]" + status + "[-::-]"
 	case strings.Contains(u, "READ ONLY") || strings.Contains(u, "INACTIVE") ||
 		strings.Contains(u, "UNKNOWN") || strings.Contains(u, "PARCIAL") ||
 		strings.Contains(u, "STALE") || strings.Contains(u, "MED") ||
 		strings.Contains(u, "WARNING") || strings.Contains(u, "RUNNING"):
-		return "[yellow]" + status + "[-]"
+		return "[yellow::b]" + status + "[-::-]"
 	case strings.Contains(u, "ONLINE") || strings.Contains(u, "OPEN") ||
 		strings.Contains(u, "READ WRITE") || strings.Contains(u, "CONNECTED") ||
 		strings.Contains(u, "COMPLETED") || strings.Contains(u, "READY") ||
@@ -168,7 +326,7 @@ func ColorStatus(status string) string {
 		(strings.Contains(u, "MOUNTED") && !strings.Contains(u, "DISMOUNTED")) ||
 		strings.Contains(u, "FRESH") || strings.Contains(u, "ACTIVE") ||
 		strings.Contains(u, "LOW") || u == "YES" || u == "INFO":
-		return "[green]" + status + "[-]"
+		return "[lime::b]" + status + "[-::-]"
 	default:
 		return status
 	}

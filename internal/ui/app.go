@@ -26,6 +26,8 @@ type AppUI struct {
 	Footer          *tview.TextView
 	ActiveView      string
 	ShowMenuHelp    bool
+	ColorTheme      ColorThemeName
+	isHoveringNav   bool
 	activeModalList *tview.List
 	viewFocusables  map[string][]tview.Primitive
 	tableActions    map[*tview.Table]func(row, col int)
@@ -43,6 +45,7 @@ func NewAppUI(state *model.EnvironmentState) *AppUI {
 		state.BorderMode = model.BorderMixedUnicode
 	}
 	ApplyBorderTheme(state.BorderMode)
+	ApplyColorTheme(ThemeNorton)
 
 	ui := &AppUI{
 		App:            tview.NewApplication(),
@@ -50,6 +53,7 @@ func NewAppUI(state *model.EnvironmentState) *AppUI {
 		State:          state,
 		ActiveView:     "overview",
 		ShowMenuHelp:   true,
+		ColorTheme:     ThemeNorton,
 		viewFocusables: make(map[string][]tview.Primitive),
 		tableActions:   make(map[*tview.Table]func(row, col int)),
 	}
@@ -65,6 +69,114 @@ func (u *AppUI) bindTableActions(tbl *tview.Table, fn func(row, col int)) {
 	}
 	u.tableActions[tbl] = fn
 	tbl.SetSelectedFunc(fn)
+}
+
+// listIndexAtPoint returns the item index at screen coordinates (x, y) inside a tview.List, or -1 if outside.
+func listIndexAtPoint(l *tview.List, x, y int) int {
+	if l == nil {
+		return -1
+	}
+	rx, ry, rw, rh := l.GetInnerRect()
+	if x < rx || x >= rx+rw || y < ry || y >= ry+rh {
+		return -1
+	}
+	idx := y - ry
+	if idx < 0 || idx >= l.GetItemCount() {
+		return -1
+	}
+	return idx
+}
+
+func (u *AppUI) activeViewNavIndex() int {
+	for i, e := range u.navEntries() {
+		if e.key != "" && e.key == u.ActiveView {
+			return i
+		}
+	}
+	return 0
+}
+
+// updateFocusVisuals applies the active color palette (Norton Commander / Turbo C / Dark),
+// highlights the currently focused/hovered window and row in high-contrast colors,
+// and dims unfocused windows so the user always knows which menu or table option the mouse is over.
+func (u *AppUI) updateFocusVisuals() {
+	if u.NavList == nil {
+		return
+	}
+	pal := currentPalette
+	currFocus := u.App.GetFocus()
+	hasModal := u.Pages != nil && u.Pages.HasPage("modal")
+
+	if u.Header != nil {
+		u.Header.SetBackgroundColor(pal.HeaderBg)
+		u.Header.SetBorderColor(pal.ActiveBorder)
+		u.Header.SetTitleColor(pal.ActiveTitle)
+	}
+	if u.LogView != nil {
+		u.LogView.SetBackgroundColor(pal.LogBg)
+		u.LogView.SetBorderColor(pal.InactiveBorder)
+		u.LogView.SetTitleColor(pal.InactiveTitle)
+	}
+	if u.Footer != nil {
+		u.Footer.SetBackgroundColor(pal.FooterBg)
+	}
+
+	u.NavList.SetBackgroundColor(pal.NavBg)
+	u.NavList.SetMainTextStyle(tcell.StyleDefault.Background(pal.NavBg).Foreground(pal.NavFg))
+
+	navFocused := !hasModal && (currFocus == nil || currFocus == u.NavList)
+	if navFocused {
+		u.NavList.SetBorderColor(pal.ActiveBorder)
+		u.NavList.SetTitleColor(pal.ActiveTitle)
+		u.NavList.SetSelectedBackgroundColor(pal.CursorBg)
+		u.NavList.SetSelectedTextColor(pal.CursorFg)
+	} else {
+		u.NavList.SetBorderColor(pal.InactiveBorder)
+		u.NavList.SetTitleColor(pal.InactiveTitle)
+		u.NavList.SetSelectedBackgroundColor(pal.NavUnfocusedBg)
+		u.NavList.SetSelectedTextColor(pal.NavUnfocusedFg)
+	}
+
+	for _, p := range u.viewFocusables[u.ActiveView] {
+		hasFocus := !hasModal && currFocus == p
+		switch w := p.(type) {
+		case *tview.Table:
+			w.SetBackgroundColor(pal.PanelBg)
+			if hasFocus {
+				w.SetBorderColor(pal.ActiveBorder)
+				w.SetTitleColor(pal.ActiveTitle)
+				w.SetSelectable(true, false)
+				w.SetSelectedStyle(tcell.StyleDefault.Background(pal.CursorBg).Foreground(pal.CursorFg).Bold(true))
+			} else {
+				w.SetBorderColor(pal.InactiveBorder)
+				w.SetTitleColor(pal.InactiveTitle)
+				w.SetSelectable(false, false)
+			}
+		case *tview.List:
+			w.SetBackgroundColor(pal.PanelBg)
+			w.SetMainTextStyle(tcell.StyleDefault.Background(pal.PanelBg).Foreground(pal.PanelFg))
+			if hasFocus {
+				w.SetBorderColor(pal.ActiveBorder)
+				w.SetTitleColor(pal.ActiveTitle)
+				w.SetSelectedBackgroundColor(pal.CursorBg)
+				w.SetSelectedTextColor(pal.CursorFg)
+			} else {
+				w.SetBorderColor(pal.InactiveBorder)
+				w.SetTitleColor(pal.InactiveTitle)
+				w.SetSelectedBackgroundColor(pal.NavUnfocusedBg)
+				w.SetSelectedTextColor(pal.NavUnfocusedFg)
+			}
+		case *tview.TextView:
+			w.SetBackgroundColor(pal.PanelBg)
+			if hasFocus {
+				w.SetBorderColor(pal.ActiveBorder)
+				w.SetTitleColor(pal.ActiveTitle)
+			} else {
+				w.SetBorderColor(pal.InactiveBorder)
+				w.SetTitleColor(pal.InactiveTitle)
+			}
+		}
+	}
 }
 
 func (u *AppUI) winTitle(base, hint string) string {
@@ -85,9 +197,9 @@ func (u *AppUI) Logf(format string, args ...interface{}) {
 // always has at least 1 selectable data row (row 1) so tview never traps focus on an empty table.
 func ensureSelectableRow(tbl *tview.Table, colCount int, emptyMsg string) {
 	if tbl.GetRowCount() <= 1 {
-		tbl.SetCell(1, 0, tview.NewTableCell("[gray]"+emptyMsg+"[-]").SetSelectable(true))
+		tbl.SetCell(1, 0, tview.NewTableCell("[#d0d0d0]"+emptyMsg+"[-]").SetSelectable(true))
 		for c := 1; c < colCount; c++ {
-			tbl.SetCell(1, c, tview.NewTableCell("[gray]-[-]").SetSelectable(true))
+			tbl.SetCell(1, c, tview.NewTableCell("[#d0d0d0]-[-]").SetSelectable(true))
 		}
 	}
 	tbl.Select(1, 0)
@@ -104,8 +216,8 @@ func (u *AppUI) navEntries() []navEntry {
 		{"alert_log", "7. Alert Log & Errores", "ORA- & ADRCI Purge", func() { u.switchViewAndFocus("alert_log") }},
 		{"maintenance", "8. Centro Mantenimiento", "Asistentes Guiados", func() { u.switchViewAndFocus("maintenance") }},
 		{"", "F1. Ayuda en Menus", "Ocultar/Ver Ayuda", func() { u.toggleMenuHelp() }},
+		{"", "c. Tema Norton/TurboC", "Azul NC / Turbo C", func() { u.cycleColorTheme() }},
 		{"", "b. Cambiar Marcos", "Simple ┌─┐ / ╔═╗", func() { u.cycleBorderMode() }},
-		{"", "t. Cambiar Topologia", "RAC / Single Inst", func() { u.toggleTopology() }},
 		{"", "q. Salir (Ctrl+C)", "Cerrar programa", func() { u.App.Stop() }},
 	}
 }
@@ -114,13 +226,13 @@ func (u *AppUI) populateNavList() {
 	currIdx := u.NavList.GetCurrentItem()
 	u.NavList.Clear()
 	u.NavList.ShowSecondaryText(false)
-	u.NavList.SetTitle(u.winTitle("MENU", "↑↓ / →"))
+	u.NavList.SetTitle(u.winTitle("MENU", "Clic / ↑↓ / →"))
 
 	entries := u.navEntries()
 	for _, e := range entries {
 		label := " " + e.short
 		if u.ShowMenuHelp {
-			label = fmt.Sprintf(" %-24s [gray]│ %s[-]", e.short, e.help)
+			label = fmt.Sprintf(" %-24s │ %s", e.short, e.help)
 		}
 		u.NavList.AddItem(label, "", 0, e.fn)
 	}
@@ -148,17 +260,22 @@ func (u *AppUI) buildLayout() {
 	u.NavList = tview.NewList().
 		ShowSecondaryText(false).
 		SetHighlightFullLine(true).
-		SetSelectedBackgroundColor(tcell.ColorNavy).
-		SetSelectedTextColor(tcell.ColorWhite)
+		SetMainTextColor(tcell.ColorWhite).
+		SetSelectedBackgroundColor(tcell.ColorAqua).
+		SetSelectedTextColor(tcell.ColorBlack)
 	u.NavList.SetBorder(true)
 	u.populateNavList()
 
 	entries := u.navEntries()
 	u.NavList.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if u.isHoveringNav {
+			return
+		}
 		if index >= 0 && index < len(entries) && entries[index].key != "" {
 			viewName := entries[index].key
 			u.ActiveView = viewName
 			u.Content.SwitchToPage(viewName)
+			u.updateFocusVisuals()
 		}
 	})
 
@@ -198,8 +315,12 @@ func (u *AppUI) buildLayout() {
 	u.Pages.AddPage("main", mainFlex, true, true)
 	u.App.SetRoot(u.Pages, true)
 	u.App.EnableMouse(true)
+	u.updateFocusVisuals()
 
-	// Mouse support over SSH: Clicking any table row opens its action submenu; right-click or outside click closes modal
+	// Mouse support over SSH:
+	// - Moving the mouse (MouseMove) highlights the exact menu option or table row under the pointer in real time.
+	// - Clicking a table row opens its action submenu; clicking a menu item executes it.
+	// - Right-click or clicking outside a modal closes it.
 	u.App.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
 		if event == nil {
 			return event, action
@@ -207,6 +328,18 @@ func (u *AppUI) buildLayout() {
 		x, y := event.Position()
 
 		if u.Pages.HasPage("modal") {
+			if action == tview.MouseMove || action == tview.MouseLeftDown {
+				if u.activeModalList != nil && u.activeModalList.InRect(x, y) {
+					idx := listIndexAtPoint(u.activeModalList, x, y)
+					if idx >= 0 && idx != u.activeModalList.GetCurrentItem() {
+						u.activeModalList.SetCurrentItem(idx)
+						if action == tview.MouseMove && event.Buttons() == tcell.ButtonNone {
+							return nil, action
+						}
+					}
+				}
+				return event, action
+			}
 			if action == tview.MouseRightClick {
 				u.Pages.RemovePage("modal")
 				u.activeModalList = nil
@@ -218,6 +351,102 @@ func (u *AppUI) buildLayout() {
 				u.activeModalList = nil
 				u.focusFirstRightWindow()
 				return nil, action
+			}
+			return event, action
+		}
+
+		// Real-time hover tracking (MouseMove / MouseLeftDown) over left menu and right-side windows/tables
+		if action == tview.MouseMove || action == tview.MouseLeftDown {
+			if u.NavList.InRect(x, y) {
+				changed := false
+				if u.App.GetFocus() != u.NavList {
+					u.App.SetFocus(u.NavList)
+					changed = true
+				}
+				idx := listIndexAtPoint(u.NavList, x, y)
+				if idx >= 0 && idx != u.NavList.GetCurrentItem() {
+					u.isHoveringNav = true
+					u.NavList.SetCurrentItem(idx)
+					u.isHoveringNav = false
+					changed = true
+				}
+				if changed {
+					u.updateFocusVisuals()
+					if action == tview.MouseMove && event.Buttons() == tcell.ButtonNone {
+						return nil, action
+					}
+				}
+				return event, action
+			}
+
+			// If pointer moved out of NavList, ensure NavList shows the active view's index
+			activeNavIdx := u.activeViewNavIndex()
+			if u.NavList.GetCurrentItem() != activeNavIdx {
+				u.isHoveringNav = true
+				u.NavList.SetCurrentItem(activeNavIdx)
+				u.isHoveringNav = false
+			}
+
+			for _, p := range u.viewFocusables[u.ActiveView] {
+				switch w := p.(type) {
+				case *tview.Table:
+					if !w.InRect(x, y) {
+						continue
+					}
+					changed := false
+					if u.App.GetFocus() != w {
+						u.App.SetFocus(w)
+						changed = true
+					}
+					r, _ := w.CellAt(x, y)
+					if r >= 1 && r < w.GetRowCount() {
+						currR, _ := w.GetSelection()
+						if currR != r {
+							w.Select(r, 0)
+							changed = true
+						}
+					}
+					if changed {
+						u.updateFocusVisuals()
+						if action == tview.MouseMove && event.Buttons() == tcell.ButtonNone {
+							return nil, action
+						}
+					}
+					return event, action
+				case *tview.List:
+					if !w.InRect(x, y) {
+						continue
+					}
+					changed := false
+					if u.App.GetFocus() != w {
+						u.App.SetFocus(w)
+						changed = true
+					}
+					idx := listIndexAtPoint(w, x, y)
+					if idx >= 0 && idx != w.GetCurrentItem() {
+						w.SetCurrentItem(idx)
+						changed = true
+					}
+					if changed {
+						u.updateFocusVisuals()
+						if action == tview.MouseMove && event.Buttons() == tcell.ButtonNone {
+							return nil, action
+						}
+					}
+					return event, action
+				case *tview.TextView:
+					if !w.InRect(x, y) {
+						continue
+					}
+					if u.App.GetFocus() != w {
+						u.App.SetFocus(w)
+						u.updateFocusVisuals()
+						if action == tview.MouseMove && event.Buttons() == tcell.ButtonNone {
+							return nil, action
+						}
+					}
+					return event, action
+				}
 			}
 			return event, action
 		}
@@ -238,6 +467,7 @@ func (u *AppUI) buildLayout() {
 				}
 				if r >= 1 && r < tbl.GetRowCount() {
 					tbl.Select(r, 0)
+					u.updateFocusVisuals()
 					if fn, hasFn := u.tableActions[tbl]; hasFn && fn != nil {
 						fn(r, c)
 						return nil, action
@@ -267,6 +497,7 @@ func (u *AppUI) buildLayout() {
 		if u.Pages.HasPage("modal") {
 			if event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyLeft {
 				u.Pages.RemovePage("modal")
+				u.activeModalList = nil
 				u.focusFirstRightWindow()
 				return nil
 			}
@@ -282,6 +513,7 @@ func (u *AppUI) buildLayout() {
 			return nil
 		case tcell.KeyEscape:
 			u.App.SetFocus(u.NavList)
+			u.updateFocusVisuals()
 			return nil
 		case tcell.KeyRune:
 			switch event.Rune() {
@@ -323,6 +555,9 @@ func (u *AppUI) buildLayout() {
 			case 'm', 'M':
 				u.showGlobalMaintenancePopup()
 				return nil
+			case 'c', 'C':
+				u.cycleColorTheme()
+				return nil
 			case 'b', 'B':
 				u.cycleBorderMode()
 				return nil
@@ -337,14 +572,15 @@ func (u *AppUI) buildLayout() {
 		return event
 	})
 
-	u.Logf("Auto-Discovery: Modo=%s │ Host=%s │ Ver=%s │ [yellow]Raton SSH + ←/→[-] Activos │ [yellow]F1[-] Ayuda │ [yellow]Ctrl+C[-] Salir",
-		u.State.Topology, u.State.HostName, u.State.ReleaseVersion)
+	u.Logf("Auto-Discovery: Modo=%s │ Host=%s │ Ver=%s │ Tema=[yellow]%s[-] │ [yellow]Raton SSH[-] Activo",
+		u.State.Topology, u.State.HostName, u.State.ReleaseVersion, u.ColorTheme)
 }
 
 func (u *AppUI) moveWindowFocus(delta int) {
 	chain := append([]tview.Primitive{u.NavList}, u.viewFocusables[u.ActiveView]...)
 	if len(chain) <= 1 {
 		u.App.SetFocus(u.NavList)
+		u.updateFocusVisuals()
 		return
 	}
 
@@ -364,6 +600,7 @@ func (u *AppUI) moveWindowFocus(delta int) {
 		nextIdx = len(chain) - 1
 	}
 	u.App.SetFocus(chain[nextIdx])
+	u.updateFocusVisuals()
 }
 
 func (u *AppUI) focusFirstRightWindow() {
@@ -373,11 +610,18 @@ func (u *AppUI) focusFirstRightWindow() {
 	} else {
 		u.App.SetFocus(u.NavList)
 	}
+	u.updateFocusVisuals()
 }
 
 func (u *AppUI) switchViewAndFocus(name string) {
 	u.ActiveView = name
 	u.Content.SwitchToPage(name)
+	activeNavIdx := u.activeViewNavIndex()
+	if u.NavList.GetCurrentItem() != activeNavIdx {
+		u.isHoveringNav = true
+		u.NavList.SetCurrentItem(activeNavIdx)
+		u.isHoveringNav = false
+	}
 	u.focusFirstRightWindow()
 }
 
@@ -398,9 +642,9 @@ func (u *AppUI) toggleMenuHelp() {
 	}
 	u.refreshFooter()
 	u.rebuildContentViews()
-	stateStr := "[green]ACTIVADA[-]"
+	stateStr := "[lime::b]ACTIVADA[-::-]"
 	if !u.ShowMenuHelp {
-		stateStr = "[yellow]OCULTA (Modo Compacto)[-]"
+		stateStr = "[yellow::b]OCULTA (Modo Compacto)[-::-]"
 	}
 	u.Logf("Ayuda en menus: %s (Pulse [yellow]F1[-] o [yellow]h[-] para alternar).", stateStr)
 }
@@ -411,9 +655,19 @@ func (u *AppUI) refreshFooter() {
 		helpState = "OFF"
 	}
 	u.Footer.SetText(fmt.Sprintf(
-		"[yellow][Raton/Click][-] o [yellow][←/→/↑/↓][-] Navegar │ [yellow][Enter/Doble-Click][-] Acciones │ [yellow][F1/h][-] Ayuda:[aqua]%s[-] │ [yellow][b][-] Marcos │ [yellow][Ctrl+C/q][-] Salir",
-		helpState,
+		" [black:aqua] Raton/Hover [-:-] Marcar │ [black:aqua] Click/Enter [-:-] Submenu │ [black:aqua] F1 [-:-] Ayuda:%s │ [black:aqua] c [-:-] Tema:%s │ [black:aqua] b [-:-] Marcos │ [black:aqua] q [-:-] Salir ",
+		helpState, u.ColorTheme,
 	))
+}
+
+func (u *AppUI) cycleColorTheme() {
+	u.ColorTheme = NextColorTheme(u.ColorTheme)
+	ApplyColorTheme(u.ColorTheme)
+	u.populateNavList()
+	u.refreshHeader()
+	u.refreshFooter()
+	u.rebuildContentViews()
+	u.Logf("Tema de color cambiado a: [yellow::b]%s[-::-] (Pulse [yellow]c[-] para alternar Norton Commander / Turbo C / Oscuro)", u.ColorTheme)
 }
 
 func (u *AppUI) cycleBorderMode() {
@@ -425,7 +679,7 @@ func (u *AppUI) cycleBorderMode() {
 }
 
 func (u *AppUI) refreshHeader() {
-	modeBadge := "[black:green] " + string(u.State.Topology) + " [-:-]"
+	modeBadge := "[black:lime] " + string(u.State.Topology) + " [-:-]"
 	if u.State.IsMock {
 		modeBadge += " [black:yellow] MOCK [-:-]"
 	}
@@ -441,9 +695,9 @@ func (u *AppUI) refreshHeader() {
 	}
 	critAlerts := len(u.State.AlertEntries)
 	text := fmt.Sprintf(
-		" Modo: %s │ Host: [white::b]%s[-::-] │ Cluster: [aqua]%s[-] │ Ver: [green]%s[-] │ Marcos: [yellow]%s[-]\n"+
-			" HOME: %s (%s) │ [green]%d Inst OPEN[-] │ [aqua]%d PDBs[-] │ [yellow]%d Sesiones[-] ([red]%d Locks[-]) │ [red]%d Inválidos[-] │ [red]%d Errores ORA-[-]",
-		modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.State.BorderMode,
+		" Modo: %s │ Host: [white::b]%s[-::-] │ Cluster: [yellow::b]%s[-::-] │ Ver: [lime::b]%s[-::-] │ Tema: [yellow::b]%s[-::-]\n"+
+			" HOME: %s (%s) │ [lime::b]%d Inst OPEN[-::-] │ [white::b]%d PDBs[-::-] │ [yellow::b]%d Sesiones[-::-] ([#ff5555::b]%d Locks[-::-]) │ [#ff5555::b]%d Inválidos[-::-] │ [#ff5555::b]%d Errores ORA-[-::-]",
+		modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.ColorTheme,
 		u.State.OracleHome, u.State.OracleOwner,
 		len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
 	)
@@ -556,6 +810,7 @@ func (u *AppUI) rebuildContentViews() {
 			u.App.SetFocus(subs[focusedSubIdx])
 		}
 	}
+	u.updateFocusVisuals()
 }
 
 // View 1: Cluster, Nodes, Instances & PDBs
@@ -745,13 +1000,17 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 	ensureSelectableRow(tbl, len(headers), "Sin sesiones de usuario activas")
 
 	sqlPreview := tview.NewTextView().SetDynamicColors(true)
-	sqlPreview.SetBorder(true).SetTitle(" DETALLE SQL ACTUAL & DIAGNOSTICO DE BLOQUEO ")
+	sqlPreview.SetBackgroundColor(currentPalette.PanelBg)
+	sqlPreview.SetBorder(true).
+		SetBorderColor(currentPalette.InactiveBorder).
+		SetTitleColor(currentPalette.InactiveTitle).
+		SetTitle(" DETALLE SQL ACTUAL & DIAGNOSTICO DE BLOQUEO ")
 	if len(u.State.Sessions) > 0 {
 		s0 := u.State.Sessions[0]
 		sqlPreview.SetText(fmt.Sprintf(" [yellow]Usuario:[-] %s (SID %d,%d @ Inst %d) │ [yellow]Espera:[-] %s\n [yellow]SQL Text:[-] [white]%s[-]",
 			s0.Username, s0.SID, s0.Serial, s0.InstID, s0.WaitEvent, s0.SQLText))
 	} else {
-		sqlPreview.SetText(" [gray]Seleccione una sesion para inspeccionar su sentencia SQL y estado de bloqueo.[-]")
+		sqlPreview.SetText(" [#d0d0d0]Seleccione una sesion para inspeccionar su sentencia SQL y estado de bloqueo.[-]")
 	}
 
 	tbl.SetSelectionChangedFunc(func(row, col int) {
@@ -1554,14 +1813,16 @@ func (u *AppUI) buildMaintenancePage() tview.Primitive {
 	list := tview.NewList().
 		ShowSecondaryText(false).
 		SetHighlightFullLine(true).
-		SetSelectedBackgroundColor(tcell.ColorNavy)
+		SetMainTextColor(tcell.ColorWhite).
+		SetSelectedBackgroundColor(tcell.ColorAqua).
+		SetSelectedTextColor(tcell.ColorBlack)
 	list.SetBorder(true).SetTitle(u.winTitle("══ CENTRO DE TAREAS DE MANTENIMIENTO GUIADO ══", "Clic/Enter │ ← Menu │ F1 Ayuda"))
 
 	actions := u.getAllMaintenanceActions()
 	for idx, act := range actions {
 		line := fmt.Sprintf(" [%d] %s", idx+1, act.title)
 		if u.ShowMenuHelp {
-			line = fmt.Sprintf(" [%d] %-56s [gray]│ %s[-]", idx+1, act.title, act.subtitle)
+			line = fmt.Sprintf(" [%d] %-56s │ %s", idx+1, act.title, act.subtitle)
 		}
 		list.AddItem(line, "", 0, act.handler)
 	}
@@ -1704,12 +1965,18 @@ func (u *AppUI) showGlobalMaintenancePopup() {
 // showActionMenuModal displays a double-bordered Unicode popup window where all options
 // fit on screen simultaneously without horizontal or vertical scrolling.
 func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
+	pal := currentPalette
 	list := tview.NewList().
 		ShowSecondaryText(false).
-		SetHighlightFullLine(true).
-		SetSelectedBackgroundColor(tcell.ColorNavy).
-		SetSelectedTextColor(tcell.ColorWhite)
-	list.SetBorder(true).SetTitle(title)
+		SetHighlightFullLine(true)
+	list.SetBackgroundColor(pal.ModalBg)
+	list.SetMainTextStyle(tcell.StyleDefault.Background(pal.ModalBg).Foreground(pal.ModalFg))
+	list.SetSelectedBackgroundColor(pal.ModalCursorBg)
+	list.SetSelectedTextColor(pal.ModalCursorFg)
+	list.SetBorder(true).
+		SetBorderColor(pal.ModalBorder).
+		SetTitleColor(pal.ModalTitle).
+		SetTitle(title)
 	u.activeModalList = list
 
 	maxWidth := len(title) + 6
@@ -1718,7 +1985,7 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 		actTitle := act.title
 		line := fmt.Sprintf(" ▸ [%d] %s", i+1, actTitle)
 		if u.ShowMenuHelp && act.subtitle != "" {
-			line = fmt.Sprintf(" ▸ [%d] %-52s [gray]│ %s[-]", i+1, actTitle, act.subtitle)
+			line = fmt.Sprintf(" ▸ [%d] %-52s │ %s", i+1, actTitle, act.subtitle)
 		}
 		plainLen := len(actTitle) + len(act.subtitle) + 18
 		if plainLen > maxWidth {
@@ -1736,7 +2003,7 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 		u.toggleMenuHelp()
 		u.showActionMenuModal(title, actions)
 	})
-	list.AddItem(" ▸ [Esc / ←] Cancelar / Cerrar Ventana", "", 0, func() {
+	list.AddItem(" ▸ [Esc / Clic Derecho] Cancelar / Cerrar Ventana", "", 0, func() {
 		u.Pages.RemovePage("modal")
 		u.activeModalList = nil
 		u.focusFirstRightWindow()
@@ -1761,23 +2028,58 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 
 	u.Pages.AddPage("modal", modalFlex, true, true)
 	u.App.SetFocus(list)
+	u.updateFocusVisuals()
 }
 
 func (u *AppUI) showConfirmModal(taskName string, onConfirm func()) {
-	u.activeModalList = nil
-	modal := tview.NewModal().
-		SetText(fmt.Sprintf("CONFIRMAR TAREA DE MANTENIMIENTO\n\nAccion: %s\n\n¿Desea ejecutar esta operacion ahora?", taskName)).
-		AddButtons([]string{"[ EJECUTAR ]", "[ CANCELAR ]"}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			u.Pages.RemovePage("modal")
-			u.activeModalList = nil
-			if buttonIndex == 0 && onConfirm != nil {
-				onConfirm()
-			}
-			u.focusFirstRightWindow()
-		})
-	modal.SetBorder(true).SetTitle(" ══ CONFIRMACION DE SEGURIDAD ══ ")
-	u.Pages.AddPage("modal", modal, true, true)
+	pal := currentPalette
+	list := tview.NewList().
+		ShowSecondaryText(false).
+		SetHighlightFullLine(true)
+	list.SetBackgroundColor(pal.ConfirmBg)
+	list.SetMainTextStyle(tcell.StyleDefault.Background(pal.ConfirmBg).Foreground(pal.ConfirmFg))
+	list.SetSelectedBackgroundColor(pal.ConfirmCursorBg)
+	list.SetSelectedTextColor(pal.ConfirmCursorFg)
+	title := fmt.Sprintf(" ══ CONFIRMAR OPERACION: %s ══ ", taskName)
+	list.SetBorder(true).
+		SetBorderColor(pal.ConfirmBorder).
+		SetTitleColor(pal.ConfirmBorder).
+		SetTitle(title)
+	u.activeModalList = list
+
+	list.AddItem(" ▸ [1] EJECUTAR AHORA    │ Confirmar y lanzar operacion seleccionada", "", 0, func() {
+		u.Pages.RemovePage("modal")
+		u.activeModalList = nil
+		if onConfirm != nil {
+			onConfirm()
+		}
+		u.focusFirstRightWindow()
+	})
+	list.AddItem(" ▸ [2] CANCELAR (Esc)    │ Volver sin realizar cambios", "", 0, func() {
+		u.Pages.RemovePage("modal")
+		u.activeModalList = nil
+		u.focusFirstRightWindow()
+	})
+
+	maxWidth := len(title) + 8
+	if maxWidth < 74 {
+		maxWidth = 74
+	}
+	if maxWidth > 110 {
+		maxWidth = 110
+	}
+
+	modalFlex := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(list, 4, 1, true).
+			AddItem(nil, 0, 1, false), maxWidth, 1, true).
+		AddItem(nil, 0, 1, false)
+
+	u.Pages.AddPage("modal", modalFlex, true, true)
+	u.App.SetFocus(list)
+	u.updateFocusVisuals()
 }
 
 func (u *AppUI) runSimulatedTask(taskName string, steps []string, onDone func()) {
