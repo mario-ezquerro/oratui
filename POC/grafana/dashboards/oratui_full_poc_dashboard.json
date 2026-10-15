@@ -1,0 +1,1106 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "1. Resumen Ejecutivo: Colector OpenTelemetry, Clusterware, Instancias, FRA, PDBs, Servicios & Listeners",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 1, "text": "DOWN" },
+                "1": { "color": "green", "index": 0, "text": "ONLINE" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_info{host=~\"$host\"}",
+          "legendFormat": "{{host}} ({{topology}} {{oracle_version}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Servidor & Topología Oracle",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 2, "text": "DOWN" },
+                "0.5": { "color": "yellow", "index": 1, "text": "MOUNTED" },
+                "1": { "color": "green", "index": 0, "text": "OPEN" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 5, "x": 4, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_instance_up{host=~\"$host\"}",
+          "legendFormat": "{{instance}} ({{open_mode}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Estado de Instancias Oracle",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 75 },
+              { "color": "red", "value": 85 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 9, "y": 1 },
+      "id": 3,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_instance_fra_used_percent{host=~\"$host\"}",
+          "legendFormat": "FRA % ({{instance}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Fast Recovery Area (FRA %)",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 13, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "oratui_sessions_active_total{host=~\"$host\"}",
+          "legendFormat": "Activas ({{host}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_sessions_blocking_locks_total{host=~\"$host\"}",
+          "legendFormat": "Locks TX/TM ({{host}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Sesiones Activas & Locks TX/TM",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 3, "x": 17, "y": 1 },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "oratui_alert_ora_errors_total{host=~\"$host\"}",
+          "legendFormat": "Errores ORA-",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_invalid_objects_total{host=~\"$host\"}",
+          "legendFormat": "Objetos INVALID",
+          "refId": "B"
+        }
+      ],
+      "title": "Errores ORA- & Inválidos",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 1, "text": "DOWN" },
+                "1": { "color": "green", "index": 0, "text": "ONLINE" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 6,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_listener_up{host=~\"$host\"}",
+          "legendFormat": "{{listener}} ({{ready_status}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Listeners Oracle Net",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 1, "text": "OFFLINE" },
+                "1": { "color": "green", "index": 0, "text": "ONLINE" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 5 },
+      "id": 7,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_cluster_node_up{host=~\"$host\"}",
+          "legendFormat": "Nodo {{node}} ({{role}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_cluster_daemon_up{host=~\"$host\"}",
+          "legendFormat": "{{node}}: {{daemon}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Nodos del Cluster & Demonios (CRS / CSSD / EVMD / ASM)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "orange", "index": 1, "text": "MOUNTED" },
+                "1": { "color": "green", "index": 0, "text": "READ WRITE" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "orange", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 8, "y": 5 },
+      "id": 8,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_pdb_up{host=~\"$host\"}",
+          "legendFormat": "{{pdb}} ({{open_mode}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Estado de PDBs (Multitenant)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "decgbytes"
+        }
+      },
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 5 },
+      "id": 9,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_pdb_size_gb{host=~\"$host\"}",
+          "legendFormat": "PDB {{pdb}} (CON_ID {{con_id}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Tamaño de PDBs (GB)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 1, "text": "STOPPED" },
+                "0.5": { "color": "yellow", "index": 2, "text": "UNKNOWN" },
+                "1": { "color": "green", "index": 0, "text": "READY / ONLINE" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 5 },
+      "id": 10,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_service_up{host=~\"$host\"}",
+          "legendFormat": "Svc: {{service}} ({{pdb}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_listener_service_status{host=~\"$host\"}",
+          "legendFormat": "Lsnr {{listener}}: {{service}} ({{status}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Servicios BD & Handlers Listener",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "id": 101,
+      "panels": [],
+      "title": "2. Almacenamiento Oracle: Tablespaces, Capacidad AUTOEXTEND, Datafiles, ASM Diskgroups, Top Segmentos & Objetos Inválidos",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "orange", "value": 85 },
+              { "color": "red", "value": 92 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "id": 11,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "sort_desc(oratui_tablespace_used_percent{host=~\"$host\"})",
+          "legendFormat": "{{tablespace}} ({{type}} | AutoExt:{{autoextend}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Ocupación Real de Tablespaces % (Con AUTOEXTEND MAXBYTES)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "unit": "decmbytes"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "id": 12,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_tablespace_used_mb{host=~\"$host\"}",
+          "legendFormat": "Usado MB: {{tablespace}}",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_tablespace_alloc_mb{host=~\"$host\"}",
+          "legendFormat": "Asignado Disco MB: {{tablespace}}",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_tablespace_free_mb{host=~\"$host\"}",
+          "legendFormat": "Libre Real MB: {{tablespace}}",
+          "refId": "C"
+        },
+        {
+          "expr": "oratui_tablespace_max_mb{host=~\"$host\"}",
+          "legendFormat": "Max Autoextend MB: {{tablespace}}",
+          "refId": "D"
+        }
+      ],
+      "title": "Evolución de Espacio en Tablespaces (Usado vs Asignado vs Libre vs Max MB)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 88 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "id": 13,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_asm_diskgroup_used_percent{host=~\"$host\"}",
+          "legendFormat": "ASM +{{diskgroup}} ({{state}} / {{redundancy}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_instance_fra_used_percent{host=~\"$host\"}",
+          "legendFormat": "FRA {{instance}} ({{db_name}})",
+          "refId": "B"
+        }
+      ],
+      "title": "ASM Diskgroups (% Uso) & Fast Recovery Area (% FRA)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 512 },
+              { "color": "yellow", "value": 4096 }
+            ]
+          },
+          "unit": "decmbytes"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 18 },
+      "id": 14,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "sort_desc(oratui_datafile_size_mb{host=~\"$host\"})",
+          "legendFormat": "[{{tablespace}}] {{file_name}} (AutoExt:{{autoextend}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Datafiles por Tamaño Actual en Disco (MB)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "purple", "value": null },
+              { "color": "orange", "value": 500 },
+              { "color": "red", "value": 2048 }
+            ]
+          },
+          "unit": "decmbytes"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 18 },
+      "id": 15,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "sort_desc(oratui_segment_size_mb{host=~\"$host\"})",
+          "legendFormat": "{{owner}}.{{segment}} ({{type}} | Stats:{{stats_status}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Tablas y Segmentos por Tamaño (MB) & Estado de Estadísticas",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 18 },
+      "id": 16,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_invalid_objects_total{host=~\"$host\"}",
+          "legendFormat": "TOTAL INVÁLIDOS ({{host}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_invalid_object_info{host=~\"$host\"}",
+          "legendFormat": "{{owner}}.{{object_name}} ({{object_type}})",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_segment_stale_stats{host=~\"$host\"} == 1",
+          "legendFormat": "STALE STATS: {{owner}}.{{segment}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Objetos Inválidos (dba_objects) & Tablas con Estadísticas STALE",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "id": 102,
+      "panels": [],
+      "title": "3. Sesiones Conectadas, Bloqueos TX/TM, Memoria PGA, Backups RMAN, Data Guard & Alert Log (ORA-)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 26 },
+      "id": 17,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_sessions_total{host=~\"$host\"}",
+          "legendFormat": "Sesiones Totales ({{host}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_sessions_active_total{host=~\"$host\"}",
+          "legendFormat": "Sesiones ACTIVAS ({{host}})",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_sessions_inactive_total{host=~\"$host\"}",
+          "legendFormat": "Sesiones INACTIVAS ({{host}})",
+          "refId": "C"
+        },
+        {
+          "expr": "oratui_sessions_blocking_locks_total{host=~\"$host\"}",
+          "legendFormat": "Bloqueos TX/TM ({{host}})",
+          "refId": "D"
+        }
+      ],
+      "title": "Evolución de Sesiones (Totales / Activas / Inactivas / Bloqueos TX/TM)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "yellow", "value": 128 },
+              { "color": "red", "value": 512 }
+            ]
+          },
+          "unit": "decmbytes"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 26 },
+      "id": 18,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "sort_desc(oratui_session_pga_mb{host=~\"$host\"})",
+          "legendFormat": "SID {{sid}},{{serial}} ({{username}}) [{{status}}] -> {{event}} (Blk:{{blocking}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Consumo de Memoria PGA por Sesión (MB) & Eventos de Espera",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 26 },
+      "id": 19,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_alert_ora_error_count{host=~\"$host\"}",
+          "legendFormat": "{{error_code}} ({{instance}} | {{severity}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_alert_ora_errors_total{host=~\"$host\"}",
+          "legendFormat": "Total Errores ORA- ({{host}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Alert Log: Desglose de Errores ORA-* por Código y Severidad",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 2, "text": "FAILED" },
+                "0.5": { "color": "yellow", "index": 1, "text": "RUNNING / WARN" },
+                "1": { "color": "green", "index": 0, "text": "COMPLETED" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 33 },
+      "id": 20,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_rman_backup_status{host=~\"$host\"}",
+          "legendFormat": "RMAN {{input_type}} ({{device_type}} | {{start_time}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_restore_points_total{host=~\"$host\"}",
+          "legendFormat": "Restore Points Activos ({{host}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Estado de Jobs RMAN Backup & Puntos de Restauración (Flashback)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "decgbytes"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 33 },
+      "id": 21,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_rman_backup_size_gb{host=~\"$host\"}",
+          "legendFormat": "Job #{{session_key}}: {{input_type}} ({{status}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Tamaño de Backups RMAN (GB)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 33 },
+      "id": 22,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_dataguard_apply_lag_seconds{host=~\"$host\"}",
+          "legendFormat": "Apply Lag (s): {{standby_db}} ({{standby_host}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_dataguard_transport_lag_seconds{host=~\"$host\"}",
+          "legendFormat": "Transport Lag (s): {{standby_db}} ({{standby_host}})",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_dataguard_mrp_up{host=~\"$host\"}",
+          "legendFormat": "MRP0 Activo (1=UP, 0=DOWN): {{standby_db}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Data Guard Standby: Apply Lag, Transport Lag & Proceso MRP0",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "id": 103,
+      "panels": [],
+      "title": "4. Servidor Linux: CPU Load, RAM Física, Swap, HugePages/THP, Kernel AIO/FD, Filesystems, Inodos & SAN Multipath",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 75 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
+      "id": 23,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_os_metric_used_percent{host=~\"$host\"}",
+          "legendFormat": "[{{category}}] {{component}} -> {{current_value}} ({{status}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Salud Servidor Linux: CPU Load %, RAM Física %, Swap %, HugePages % & Kernel AIO/FD %",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 41 },
+      "id": 24,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_os_metric_used_percent{host=~\"$host\"}",
+          "legendFormat": "{{category}} - {{component}} ({{host}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Evolución Temporal de Recursos Linux (CPU Load, RAM, Swap, HugePages, Kernel AIO)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 49 },
+      "id": 25,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_filesystem_used_percent{host=~\"$host\"}",
+          "legendFormat": "Espacio {{mountpoint}} ({{device}} - {{fstype}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_filesystem_inodes_used_percent{host=~\"$host\"}",
+          "legendFormat": "Inodos {{mountpoint}} (prevención ORA-09925)",
+          "refId": "B"
+        }
+      ],
+      "title": "Filesystems Montados: % Espacio Usado vs % Inodos (df -PTm / df -Pi)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 1, "text": "DEGRADED / FAULTY" },
+                "1": { "color": "green", "index": 0, "text": "ALL PATHS OK" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 49 },
+      "id": 26,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_storage_path_healthy{host=~\"$host\"}",
+          "legendFormat": "[{{type}}] {{name}} ({{size}}) -> {{paths_summary}}",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_os_metric_healthy{host=~\"$host\"}",
+          "legendFormat": "[{{category}}] {{component}} ({{status}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Estado de Caminos SAN Multipath, Tarjetas FC HBA, Discos & Chequeos Kernel",
+      "type": "stat"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["oracle", "rac", "oratui", "opentelemetry", "prometheus", "linux", "san", "multipath", "poc"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+        "definition": "label_values(oratui_info, host)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "host",
+        "options": [],
+        "query": { "query": "label_values(oratui_info, host)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "POC - Oracle Cluster, DB, ASM & Linux/SAN Full Observability (ora-tui)",
+  "uid": "oratui-full-observability-poc",
+  "version": 1
+}

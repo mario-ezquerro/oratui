@@ -149,21 +149,21 @@ Al hacer **clic con el ratón** o navegar con las **Flechas (`↑`/`↓`) + `Ent
 #### Instalar por primera vez con `dnf`
 * **Directamente desde GitHub:**
   ```bash
-  sudo dnf install -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.5.0-1.x86_64.rpm
+  sudo dnf install -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.6.0-1.x86_64.rpm
   ```
 * **Desde un archivo `.rpm` descargado localmente (o copiado por `scp`):**
   ```bash
-  sudo dnf install -y ./ora-tui-1.5.0-1.x86_64.rpm
+  sudo dnf install -y ./ora-tui-1.6.0-1.x86_64.rpm
   ```
 
 #### Reinstalar / Actualizar a la última compilación con `dnf`
 Para actualizar o reinstalar saltándose tanto la caché local de `dnf` como la caché CDN de 5 minutos de GitHub (`raw.githubusercontent.com`):
 ```bash
 sudo dnf clean all
-curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.5.0-1.x86_64.rpm?t=$(date +%s)"
+curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.6.0-1.x86_64.rpm?t=$(date +%s)"
 sudo dnf install -y /tmp/ora-tui.rpm || sudo dnf reinstall -y /tmp/ora-tui.rpm
 ```
-*(O si ya tienes el archivo en local: `sudo dnf reinstall -y ./ora-tui-1.5.0-1.x86_64.rpm`)*
+*(O si ya tienes el archivo en local: `sudo dnf reinstall -y ./ora-tui-1.6.0-1.x86_64.rpm`)*
 
 ---
 
@@ -172,34 +172,34 @@ sudo dnf install -y /tmp/ora-tui.rpm || sudo dnf reinstall -y /tmp/ora-tui.rpm
 #### Instalar por primera vez con `rpm`
 * **Directamente desde GitHub:**
   ```bash
-  sudo rpm -ivh https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.5.0-1.x86_64.rpm
+  sudo rpm -ivh https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.6.0-1.x86_64.rpm
   ```
 * **Desde un archivo local:**
   ```bash
-  sudo rpm -ivh ./ora-tui-1.5.0-1.x86_64.rpm
+  sudo rpm -ivh ./ora-tui-1.6.0-1.x86_64.rpm
   ```
 
 #### Reinstalar / Forzar actualización con `rpm`
 Para reinstalar o actualizar encima de cualquier versión previa forzando la sustitución del binario (`/usr/bin/ora-tui`) y evitando la caché CDN de GitHub:
 * **Directamente desde GitHub (sin caché):**
   ```bash
-  curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.5.0-1.x86_64.rpm?t=$(date +%s)"
+  curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.6.0-1.x86_64.rpm?t=$(date +%s)"
   sudo rpm -Uvh --replacepkgs --force /tmp/ora-tui.rpm
   ```
 * **Desde un archivo local:**
   ```bash
-  sudo rpm -Uvh --replacepkgs --force ./ora-tui-1.5.0-1.x86_64.rpm
+  sudo rpm -Uvh --replacepkgs --force ./ora-tui-1.6.0-1.x86_64.rpm
   ```
 
 ---
 
 ### 3. Usando `apt-get` / `apt` (Debian / Ubuntu)
 
-El repositorio incluye también el paquete Debian/Ubuntu precompilado en `dist/ora-tui_1.5.0-1_amd64.deb`.
+El repositorio incluye también el paquete Debian/Ubuntu precompilado en `dist/ora-tui_1.6.0-1_amd64.deb`.
 
 #### Instalar por primera vez con `apt-get`
 ```bash
-curl -fL -o /tmp/ora-tui.deb https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.5.0-1_amd64.deb
+curl -fL -o /tmp/ora-tui.deb https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.6.0-1_amd64.deb
 sudo apt-get install -y /tmp/ora-tui.deb
 ```
 *(También puedes usar `sudo dpkg -i /tmp/ora-tui.deb`)*
@@ -207,7 +207,7 @@ sudo apt-get install -y /tmp/ora-tui.deb
 #### Reinstalar / Actualizar a la última compilación con `apt-get`
 Para volver a descargar el paquete `.deb` actualizado desde GitHub sin caché CDN y forzar su reinstalación con `apt-get`:
 ```bash
-curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.deb "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.5.0-1_amd64.deb?t=$(date +%s)"
+curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.deb "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.6.0-1_amd64.deb?t=$(date +%s)"
 sudo apt-get install --reinstall -y /tmp/ora-tui.deb
 ```
 *(O bien con `dpkg`: `sudo dpkg -i --force-overwrite /tmp/ora-tui.deb`)*
@@ -291,7 +291,7 @@ Al instalar el paquete, encontrarás las plantillas listas para producción en *
       metrics_path: "/metrics"
       static_configs:
         - targets:
-            - "srv-dbgriar-des:9161"
+            - "servidor-local:9161"
   ```
 * **[`monitoring/prometheus/oracle_alerts.yml`](file:///Users/mario/repositorios/oratui/monitoring/prometheus/oracle_alerts.yml)** — Incluye **14 reglas de alarma preconfiguradas**:
   1. `OracleInstanceDown` (`oratui_instance_up < 1`)
@@ -323,11 +323,34 @@ El archivo **[`monitoring/grafana/oratui_dashboard.json`](file:///Users/mario/re
 10. Gráfica temporal de Sesiones, Bloqueos TX/TM y Retraso de Data Guard (`Apply Lag`).
 11. Gráfica temporal de Errores `ORA-` por código, Estado de Listeners y Backups RMAN.
 
-*(Si quieres levantar Prometheus + Grafana rápidamente con Docker, tienes listo [`monitoring/docker-compose.yml`](file:///Users/mario/repositorios/oratui/monitoring/docker-compose.yml) en `/usr/share/ora-tui/monitoring/docker-compose.yml`).*
+*(Si quieres levantar Prometheus + Grafana rápidamente con Docker, tienes lista la carpeta **[`POC/`](file:///Users/mario/repositorios/oratui/POC)** explicada a continuación).*
 
 ---
 
-### 6. Ejecutar en Modo Simulación / Mock (macOS / Linux sin Oracle instalado)
+### 6. Carpeta `POC/` Lista para Montar en un Servidor con Docker (`configure-poc.sh`)
+
+En la carpeta **[`POC/`](file:///Users/mario/repositorios/oratui/POC)** del repositorio (y también instalada automáticamente en **`/usr/share/ora-tui/POC/`** al instalar el paquete `.rpm` o `.deb`) tienes todo preparado para copiarla a cualquier máquina con Docker y levantar **Prometheus + Grafana con las 26 gráficas y 15 alertas preconfiguradas** sin tocar ni un solo fichero manualmente:
+
+1. **Copia la carpeta `POC` a tu servidor con Docker:**
+   ```bash
+   # Desde el servidor Oracle donde instalaste ora-tui:
+   scp -r /usr/share/ora-tui/POC usuario@servidor-docker:~/POC
+   # O clonando el repositorio en el servidor Docker:
+   git clone https://github.com/mario-ezquerro/oratui.git && cd oratui/POC
+   ```
+2. **Ejecuta el script interactivo `./configure-poc.sh` (o `./start-poc.sh`):**
+   Cada vez que ejecutes el script, **te pedirá interactivamente el nombre o IP del host Oracle a monitorizar** (y el puerto, por defecto `9161`), actualizará `prometheus/prometheus.yml`, verificará la conexión con `ora-tui` y levantará/recargará los contenedores de Prometheus y Grafana:
+   ```bash
+   cd ~/POC
+   chmod +x configure-poc.sh start-poc.sh
+   ./configure-poc.sh
+   ```
+3. **Abre Grafana en tu navegador (`http://<IP_SERVIDOR_DOCKER>:3000`, usuario `admin` / `admin`):**
+   El Datasource de Prometheus y el Dashboard completo de 26 paneles (**`POC - Oracle Cluster, DB, ASM & Linux/SAN Full Observability (ora-tui)`**) se cargan automáticamente como página de inicio.
+
+---
+
+### 7. Ejecutar en Modo Simulación / Mock (macOS / Linux sin Oracle instalado)
 Si ejecutas `ora-tui` en un equipo de desarrollo sin Oracle instalado (o pasas `--mock`), se inicia automáticamente el simulador interactivo completo:
 
 ```bash
@@ -340,7 +363,7 @@ make mock
 
 ---
 
-### 7. Compilar Binario Estático y Generar los Paquetes `.rpm` y `.deb` desde el Código Fuente
+### 8. Compilar Binario Estático y Generar los Paquetes `.rpm` y `.deb` desde el Código Fuente
 ```bash
 make all && make packages
 ```
@@ -360,11 +383,13 @@ ora-tui/
 │   ├── actions/                   # Flujos de parada/arranque, Node Drain, mantenimiento DBA, RMAN y ADRCI
 │   ├── executor/runner.go         # Ejecutor de comandos con cambio de UID/GID y streaming en vivo
 │   └── ui/                        # Interfaz tview/tcell con ratón SSH, ventana de resultados y temas retro
-├── monitoring/                    # Configuración lista para Prometheus, Alertas y Dashboard de Grafana
-│   ├── prometheus/prometheus.yml  # Scrape config en puerto 9161
-│   ├── prometheus/oracle_alerts.yml # 14 reglas de alarma para Oracle RAC/BD y Servidor/SAN
-│   ├── grafana/oratui_dashboard.json # Dashboard completo importable en Grafana
-│   └── docker-compose.yml         # Stack rápido de Prometheus + Grafana
+├── POC/                           # Carpeta lista para copiar a un servidor Docker (Prometheus + Grafana POC)
+│   ├── configure-poc.sh           # Script interactivo que pide el host Oracle a monitorizar y levanta Docker
+│   ├── start-poc.sh               # Script de configuración interactiva y arranque de contenedores
+│   ├── docker-compose.yml         # Stack Docker Compose con autoprovisionamiento de Grafana y Prometheus
+│   ├── prometheus/                # prometheus.yml y oracle_alerts.yml (15 reglas de alarma)
+│   └── grafana/                   # Datasource automático y Dashboard completo de 26 paneles (Home Dashboard)
+├── monitoring/                    # Plantillas base de Prometheus, Alertas y Dashboard de Grafana
 ├── packaging/                     # nfpm.yaml, ora-tui.spec, sudoers.ora-tui y ora-tui-otel.service (systemd)
 ├── dist/                          # Paquetes precompilados (.rpm y .deb) listos para instalar desde GitHub
 ├── Makefile                       # Automatización de compilación, tests y empaquetado (.rpm / .deb)

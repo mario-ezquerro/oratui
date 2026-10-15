@@ -1,7 +1,7 @@
 name: "ora-tui"
 arch: "amd64"
 platform: "linux"
-version: "1.5.0"
+version: "1.6.0"
 release: "1"
 section: "database"
 priority: "optional"
@@ -29,6 +29,72 @@ contents:
       group: root
   - src: ./packaging/ora-tui-otel.service
     dst: /usr/lib/systemd/system/ora-tui-otel.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./packaging/ora-tui-otel.service
+    dst: /usr/share/ora-tui/ora-tui-otel.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/docker-compose.yml
+    dst: /usr/share/ora-tui/POC/docker-compose.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/.env
+    dst: /usr/share/ora-tui/POC/.env
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/configure-poc.sh
+    dst: /usr/share/ora-tui/POC/configure-poc.sh
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: ./POC/start-poc.sh
+    dst: /usr/share/ora-tui/POC/start-poc.sh
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: ./POC/README.md
+    dst: /usr/share/ora-tui/POC/README.md
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/prometheus/prometheus.yml
+    dst: /usr/share/ora-tui/POC/prometheus/prometheus.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/prometheus/oracle_alerts.yml
+    dst: /usr/share/ora-tui/POC/prometheus/oracle_alerts.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/grafana/provisioning/datasources/datasource.yml
+    dst: /usr/share/ora-tui/POC/grafana/provisioning/datasources/datasource.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/grafana/provisioning/dashboards/dashboard.yml
+    dst: /usr/share/ora-tui/POC/grafana/provisioning/dashboards/dashboard.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/grafana/dashboards/oratui_full_poc_dashboard.json
+    dst: /usr/share/ora-tui/POC/grafana/dashboards/oratui_full_poc_dashboard.json
     file_info:
       mode: 0644
       owner: root

@@ -1,0 +1,39 @@
+# ==============================================================================
+# POC Prometheus Configuration for ora-tui OpenTelemetry / Prometheus Exporter
+# ==============================================================================
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  external_labels:
+    monitor: 'oratui-poc'
+    environment: 'oracle-server'
+
+rule_files:
+  - "/etc/prometheus/oracle_alerts.yml"
+
+scrape_configs:
+  # 1. Scrape del servidor Oracle remoto o local donde corre:
+  #    ora-tui --opentelemetry --daemon --otel-port=9161
+  - job_name: 'oracle-oratui-poc'
+    scrape_interval: 10s
+    scrape_timeout: 9s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          # Por defecto apunta a servidor.local:9161 (puedes cambiarlo con ./start-poc.sh <IP>:9161)
+          - 'servidor.local:9161'
+        labels:
+          application: 'ora-tui'
+          role: 'oracle-database-server'
+
+  # 2. Scrape automático del propio host Docker (por si Docker corre en la misma máquina que ora-tui)
+  - job_name: 'oracle-oratui-local-host'
+    scrape_interval: 10s
+    scrape_timeout: 9s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - 'host.docker.internal:9161'
+        labels:
+          application: 'ora-tui'
+          role: 'oracle-local-host'
