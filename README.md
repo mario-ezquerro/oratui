@@ -149,21 +149,21 @@ Al hacer **clic con el ratón** o navegar con las **Flechas (`↑`/`↓`) + `Ent
 #### Instalar por primera vez con `dnf`
 * **Directamente desde GitHub:**
   ```bash
-  sudo dnf install -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.4.0-1.x86_64.rpm
+  sudo dnf install -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.5.0-1.x86_64.rpm
   ```
 * **Desde un archivo `.rpm` descargado localmente (o copiado por `scp`):**
   ```bash
-  sudo dnf install -y ./ora-tui-1.4.0-1.x86_64.rpm
+  sudo dnf install -y ./ora-tui-1.5.0-1.x86_64.rpm
   ```
 
 #### Reinstalar / Actualizar a la última compilación con `dnf`
 Para actualizar o reinstalar saltándose tanto la caché local de `dnf` como la caché CDN de 5 minutos de GitHub (`raw.githubusercontent.com`):
 ```bash
 sudo dnf clean all
-curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.4.0-1.x86_64.rpm?t=$(date +%s)"
+curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.5.0-1.x86_64.rpm?t=$(date +%s)"
 sudo dnf install -y /tmp/ora-tui.rpm || sudo dnf reinstall -y /tmp/ora-tui.rpm
 ```
-*(O si ya tienes el archivo en local: `sudo dnf reinstall -y ./ora-tui-1.4.0-1.x86_64.rpm`)*
+*(O si ya tienes el archivo en local: `sudo dnf reinstall -y ./ora-tui-1.5.0-1.x86_64.rpm`)*
 
 ---
 
@@ -172,34 +172,34 @@ sudo dnf install -y /tmp/ora-tui.rpm || sudo dnf reinstall -y /tmp/ora-tui.rpm
 #### Instalar por primera vez con `rpm`
 * **Directamente desde GitHub:**
   ```bash
-  sudo rpm -ivh https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.4.0-1.x86_64.rpm
+  sudo rpm -ivh https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.5.0-1.x86_64.rpm
   ```
 * **Desde un archivo local:**
   ```bash
-  sudo rpm -ivh ./ora-tui-1.4.0-1.x86_64.rpm
+  sudo rpm -ivh ./ora-tui-1.5.0-1.x86_64.rpm
   ```
 
 #### Reinstalar / Forzar actualización con `rpm`
 Para reinstalar o actualizar encima de cualquier versión previa forzando la sustitución del binario (`/usr/bin/ora-tui`) y evitando la caché CDN de GitHub:
 * **Directamente desde GitHub (sin caché):**
   ```bash
-  curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.4.0-1.x86_64.rpm?t=$(date +%s)"
+  curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.5.0-1.x86_64.rpm?t=$(date +%s)"
   sudo rpm -Uvh --replacepkgs --force /tmp/ora-tui.rpm
   ```
 * **Desde un archivo local:**
   ```bash
-  sudo rpm -Uvh --replacepkgs --force ./ora-tui-1.4.0-1.x86_64.rpm
+  sudo rpm -Uvh --replacepkgs --force ./ora-tui-1.5.0-1.x86_64.rpm
   ```
 
 ---
 
 ### 3. Usando `apt-get` / `apt` (Debian / Ubuntu)
 
-El repositorio incluye también el paquete Debian/Ubuntu precompilado en `dist/ora-tui_1.4.0-1_amd64.deb`.
+El repositorio incluye también el paquete Debian/Ubuntu precompilado en `dist/ora-tui_1.5.0-1_amd64.deb`.
 
 #### Instalar por primera vez con `apt-get`
 ```bash
-curl -fL -o /tmp/ora-tui.deb https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.4.0-1_amd64.deb
+curl -fL -o /tmp/ora-tui.deb https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.5.0-1_amd64.deb
 sudo apt-get install -y /tmp/ora-tui.deb
 ```
 *(También puedes usar `sudo dpkg -i /tmp/ora-tui.deb`)*
@@ -207,7 +207,7 @@ sudo apt-get install -y /tmp/ora-tui.deb
 #### Reinstalar / Actualizar a la última compilación con `apt-get`
 Para volver a descargar el paquete `.deb` actualizado desde GitHub sin caché CDN y forzar su reinstalación con `apt-get`:
 ```bash
-curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.deb "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.4.0-1_amd64.deb?t=$(date +%s)"
+curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.deb "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.5.0-1_amd64.deb?t=$(date +%s)"
 sudo apt-get install --reinstall -y /tmp/ora-tui.deb
 ```
 *(O bien con `dpkg`: `sudo dpkg -i --force-overwrite /tmp/ora-tui.deb`)*
@@ -221,30 +221,128 @@ sudo ora-tui
 
 ---
 
-### 5. Ejecutar en Modo Simulación / Mock (macOS / Linux sin Oracle instalado)
+## Exportador OpenTelemetry & Prometheus (`--opentelemetry` / `--daemon`) + Grafana & Alertas
+
+`ora-tui` incorpora un servidor de telemetría embebido (**OpenTelemetry OTLP JSON** + **Prometheus/OpenMetrics**) que expone **todos los datos recolectados** (Clusterware, Instancias, PDBs, Tablespaces con `AUTOEXTEND`, Sesiones, Bloqueos TX/TM, Objetos Inválidos, ASM Diskgroups, Listeners, Backups RMAN, Data Guard Lag, Errores `ORA-` del Alert Log, CPU/Load, RAM, HugePages, Inodos de Filesystems y Caminos SAN Multipath).
+
+Por defecto utiliza el puerto **`9161`** (puerto estándar de monitorización Oracle en Prometheus, completamente libre de colisiones con puertos de Oracle como `1521-1529`, `5500` EM Express, `8080` APEX o `4903` OEM Agent), y puedes cambiarlo libremente con **`--otel-port`**.
+
+### 1. Cómo lanzarlo por línea de comandos
+* **Modo Híbrido (Interfaz TUI interactiva + Exportador OpenTelemetry en segundo plano):**
+  ```bash
+  sudo ora-tui --opentelemetry
+  # O cambiando el puerto (por ejemplo al 9464):
+  sudo ora-tui --opentelemetry --otel-port=9464
+  ```
+* **Modo Daemon / Headless (Sin interfaz gráfica, ideal para `systemd` o contenedores):**
+  ```bash
+  sudo ora-tui --opentelemetry --daemon --otel-port=9161 --interval=15s
+  ```
+  *(Nota: también acepta los alias `--opentlemetry` y `--otel`)*
+
+### 2. Endpoints expuestos por `ora-tui`
+Una vez iniciado, puedes consultar:
+* **`http://<IP-SERVIDOR>:9161/metrics`** $\rightarrow$ Formato **Prometheus / OpenMetrics** (listo para `prometheus.yml` o `otel-collector`).
+* **`http://<IP-SERVIDOR>:9161/otel/v1/metrics`** $\rightarrow$ Formato **OpenTelemetry OTLP/HTTP JSON (`resourceMetrics`)**.
+* **`http://<IP-SERVIDOR>:9161/api/v1/state`** $\rightarrow$ Snapshot completo en **JSON**.
+* **`http://<IP-SERVIDOR>:9161/`** $\rightarrow$ Página web de estado del exportador.
+
+### 3. Cómo iniciarlo como Servicio Daemon (`systemd`)
+El paquete `.rpm` y `.deb` instala automáticamente el servicio **`/usr/lib/systemd/system/ora-tui-otel.service`**. Para dejarlo activo de forma permanente al arrancar el servidor Linux:
+
+```bash
+# Recargar demonios, habilitar en el arranque e iniciar ahora mismo:
+sudo systemctl daemon-reload
+sudo systemctl enable --now ora-tui-otel
+
+# Verificar estado y logs en vivo del daemon:
+sudo systemctl status ora-tui-otel
+sudo journalctl -u ora-tui-otel -f
+
+# Comprobar que responde métricas Prometheus:
+curl -s http://localhost:9161/metrics | head -n 40
+```
+
+Si deseas cambiar el puerto (por ejemplo a `9464`) o el intervalo de muestreo en el servicio `systemd`:
+```bash
+sudo systemctl edit ora-tui-otel
+# Añade:
+# [Service]
+# Environment="ORA_TUI_PORT=9464"
+# Environment="ORA_TUI_INTERVAL=10s"
+sudo systemctl restart ora-tui-otel
+```
+
+### 4. Configuración de Prometheus (`prometheus.yml`) y Reglas de Alarma (`oracle_alerts.yml`)
+Al instalar el paquete, encontrarás las plantillas listas para producción en **`/usr/share/ora-tui/monitoring/`** (y en la carpeta [`monitoring/`](file:///Users/mario/repositorios/oratui/monitoring) del repositorio):
+
+* **[`monitoring/prometheus/prometheus.yml`](file:///Users/mario/repositorios/oratui/monitoring/prometheus/prometheus.yml)**:
+  ```yaml
+  global:
+    scrape_interval: 15s
+    evaluation_interval: 15s
+
+  rule_files:
+    - "oracle_alerts.yml"
+
+  scrape_configs:
+    - job_name: "oratui-oracle-exporter"
+      scrape_interval: 15s
+      metrics_path: "/metrics"
+      static_configs:
+        - targets:
+            - "srv-dbgriar-des:9161"
+  ```
+* **[`monitoring/prometheus/oracle_alerts.yml`](file:///Users/mario/repositorios/oratui/monitoring/prometheus/oracle_alerts.yml)** — Incluye **14 reglas de alarma preconfiguradas**:
+  1. `OracleInstanceDown` (`oratui_instance_up < 1`)
+  2. `OracleClusterDaemonDown` (`oratui_cluster_node_up == 0` o `oratui_cluster_daemon_up == 0`)
+  3. `OraclePDBNotOpen` (`oratui_pdb_up == 0`)
+  4. `OracleTablespaceWarning` (`>= 85%`) y `OracleTablespaceCritical` (`>= 92%` real con `AUTOEXTEND`)
+  5. `OracleFRASpaceCritical` (`oratui_instance_fra_used_percent >= 85`)
+  6. `OracleBlockingSessionsDetected` (`oratui_sessions_blocking_locks_total > 0` durante `2m`)
+  7. `OracleASMDiskgroupCritical` (`oratui_asm_diskgroup_used_percent >= 88` o `oratui_asm_diskgroup_offline_disks > 0`)
+  8. `OracleListenerDown` (`oratui_listener_up == 0`)
+  9. `OracleAlertLogORAError` (`oratui_alert_ora_errors_total > 0`)
+  10. `OracleRMANBackupFailed` (`oratui_rman_backup_status == 0`)
+  11. `OracleDataGuardSyncIssue` (`oratui_dataguard_mrp_up == 0` o `oratui_dataguard_apply_lag_seconds > 300`)
+  12. `LinuxServerHealthDegraded` (`oratui_os_metric_healthy == 0` — Load, RAM, Swap, THP o Kernel AIO)
+  13. `LinuxFilesystemOrInodesCritical` (`oratui_filesystem_used_percent >= 90` o `oratui_filesystem_inodes_used_percent >= 85` — previene `ORA-09925`)
+  14. `LinuxSANMultipathPathDown` (`oratui_storage_path_healthy == 0` — alerta inmediata si cae un camino de fibra SAN/Multipath)
+
+### 5. Dashboard de Grafana Listo para Importar (`oratui_dashboard.json`)
+El archivo **[`monitoring/grafana/oratui_dashboard.json`](file:///Users/mario/repositorios/oratui/monitoring/grafana/oratui_dashboard.json)** (instalado también en `/usr/share/ora-tui/monitoring/grafana/oratui_dashboard.json`) contiene un **Dashboard completo de 11 paneles** listo para importar en Grafana (**Dashboards $\rightarrow$ New $\rightarrow$ Import $\rightarrow$ Upload JSON file**):
+1. Estado en vivo de Instancias Oracle (`OPEN` / `MOUNTED` / `DOWN`).
+2. Estado de Nodos y Demonios Clusterware (`CRS`, `CSSD`, `EVMD`, `ASM`).
+3. Sesiones Activas vs Bloqueos TX/TM en curso.
+4. Contador de Errores `ORA-*` en el Alert Log y Objetos `INVALID`.
+5. Salud de todos los Caminos SAN Multipath (`4/4 ACTIVE` vs `DEGRADED`) y Puertos HBA Fibre Channel.
+6. Barras de Ocupación Real de Tablespaces (`%` considerando `AUTOEXTEND MAXBYTES`).
+7. Uso de ASM Diskgroups (`%`) y Fast Recovery Area (`FRA %`).
+8. Salud del Servidor Linux (`CPU Load %`, `RAM Física %`, `Swap %`, `HugePages %`, `Kernel AIO %`).
+9. Ocupación de Filesystems (`% Espacio`) y Uso de Inodos (`% Inodos` para prevenir `ORA-09925`).
+10. Gráfica temporal de Sesiones, Bloqueos TX/TM y Retraso de Data Guard (`Apply Lag`).
+11. Gráfica temporal de Errores `ORA-` por código, Estado de Listeners y Backups RMAN.
+
+*(Si quieres levantar Prometheus + Grafana rápidamente con Docker, tienes listo [`monitoring/docker-compose.yml`](file:///Users/mario/repositorios/oratui/monitoring/docker-compose.yml) en `/usr/share/ora-tui/monitoring/docker-compose.yml`).*
+
+---
+
+### 6. Ejecutar en Modo Simulación / Mock (macOS / Linux sin Oracle instalado)
 Si ejecutas `ora-tui` en un equipo de desarrollo sin Oracle instalado (o pasas `--mock`), se inicia automáticamente el simulador interactivo completo:
 
 ```bash
 # Compilar y lanzar el TUI interactivo en modo Mock RAC:
 make mock
 
-# O ejecutar directamente el binario:
-./bin/ora-tui --mock --topology=rac
-./bin/ora-tui --mock --topology=single
-
-# Imprimir vista previa estática en el terminal:
-./bin/ora-tui --preview
+# Probar el exportador OpenTelemetry/Prometheus en modo Mock daemon:
+./bin/ora-tui --mock --opentelemetry --daemon --otel-port=9161
 ```
 
 ---
 
-### 6. Compilar Binario Estático y Generar los Paquetes `.rpm` y `.deb` desde el Código Fuente
+### 7. Compilar Binario Estático y Generar los Paquetes `.rpm` y `.deb` desde el Código Fuente
 ```bash
-# Ejecutar tests unitarios y compilar binarios (nativo + Linux amd64 estático CGO_ENABLED=0):
-make all
-
-# Generar automáticamente ambos paquetes en dist/ (.rpm y .deb):
-make packages
+make all && make packages
 ```
 
 ---
@@ -253,15 +351,21 @@ make packages
 
 ```text
 ora-tui/
-├── cmd/ora-tui/main.go            # Punto de entrada, flags CLI y ciclo de refresco
+├── cmd/ora-tui/main.go            # Punto de entrada, flags CLI (--opentelemetry, --daemon, --otel-port)
 ├── internal/
-│   ├── model/state.go             # Modelos de dominio (Cluster, Instancias, Sesiones, Tablespaces, RMAN, etc.)
+│   ├── model/state.go             # Modelos de dominio (Cluster, Instancias, Sesiones, Tablespaces, RMAN, SAN)
 │   ├── discovery/                 # Auto-detección de ocr.loc, oratab, inventory.xml, /proc PMON y versión
-│   ├── collector/                 # Colectores SQL*Plus, crsctl, olsnodes, srvctl, lsnrctl y modo Mock
+│   ├── collector/                 # Colectores SQL*Plus, crsctl, olsnodes, srvctl, lsnrctl, OS Health y SAN
+│   ├── telemetry/                 # Exportador OpenTelemetry (OTLP JSON) y Prometheus (/metrics)
 │   ├── actions/                   # Flujos de parada/arranque, Node Drain, mantenimiento DBA, RMAN y ADRCI
 │   ├── executor/runner.go         # Ejecutor de comandos con cambio de UID/GID y streaming en vivo
-│   └── ui/                        # Interfaz tview/tcell con ratón SSH y temas Norton Commander / Turbo C / Fósforo Verde
-├── packaging/                     # Configuración nfpm.yaml, ora-tui.spec, sudoers.ora-tui
+│   └── ui/                        # Interfaz tview/tcell con ratón SSH, ventana de resultados y temas retro
+├── monitoring/                    # Configuración lista para Prometheus, Alertas y Dashboard de Grafana
+│   ├── prometheus/prometheus.yml  # Scrape config en puerto 9161
+│   ├── prometheus/oracle_alerts.yml # 14 reglas de alarma para Oracle RAC/BD y Servidor/SAN
+│   ├── grafana/oratui_dashboard.json # Dashboard completo importable en Grafana
+│   └── docker-compose.yml         # Stack rápido de Prometheus + Grafana
+├── packaging/                     # nfpm.yaml, ora-tui.spec, sudoers.ora-tui y ora-tui-otel.service (systemd)
 ├── dist/                          # Paquetes precompilados (.rpm y .deb) listos para instalar desde GitHub
 ├── Makefile                       # Automatización de compilación, tests y empaquetado (.rpm / .deb)
 └── SPEC.md                        # Especificación técnica detallada

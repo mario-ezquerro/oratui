@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: "oratui-oracle-monitor"
+
+# Reglas de alertas para Oracle RAC, Instancias, Tablespaces, Locks, ASM, RMAN, Data Guard, Alert Log y Servidor/SAN
+rule_files:
+  - "oracle_alerts.yml"
+
+# Configuración opcional de Alertmanager (descomentar si se dispone de Alertmanager)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["localhost:9093"]
+
+scrape_configs:
+  - job_name: "oratui-oracle-exporter"
+    scrape_interval: 15s
+    metrics_path: "/metrics"
+    static_configs:
+      # Añade aquí la IP o hostname de tus servidores Oracle con el puerto de ora-tui (por defecto 9161):
+      - targets:
+          - "localhost:9161"
+          # - "ora-rac01.corp.local:9161"
+          # - "ora-rac02.corp.local:9161"
+        labels:
+          environment: "production"
+          db_platform: "oracle"

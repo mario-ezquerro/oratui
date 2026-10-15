@@ -1,0 +1,252 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "1. Instancias Oracle OPEN",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "oratui_instance_up",
+          "legendFormat": "{{instance}} ({{node}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "0.5": { "text": "MOUNTED", "color": "yellow" }, "1": { "text": "OPEN", "color": "green" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "2. Nodos & Demonios Clusterware (CRS / CSSD / ASM)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 5, "x": 4, "y": 0 },
+      "targets": [
+        {
+          "expr": "oratui_cluster_daemon_up",
+          "legendFormat": "{{node}}:{{daemon}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OFFLINE", "color": "red" }, "1": { "text": "ONLINE", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "title": "3. Sesiones Activas vs Bloqueos TX/TM",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 5, "x": 9, "y": 0 },
+      "targets": [
+        { "expr": "oratui_sessions_active_total", "legendFormat": "Activas ({{host}})" },
+        { "expr": "oratui_sessions_blocking_locks_total", "legendFormat": "Bloqueos TX/TM ({{host}})" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "4. Errores ORA-* en Alert Log & Objetos Inválidos",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
+      "targets": [
+        { "expr": "oratui_alert_ora_errors_total", "legendFormat": "Errores ORA-" },
+        { "expr": "oratui_invalid_objects_total", "legendFormat": "Objetos INVALID" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "5. Salud Paths SAN Multipath & HBA FC",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
+      "targets": [
+        {
+          "expr": "oratui_storage_path_healthy",
+          "legendFormat": "{{name}} ({{paths_summary}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DEGRADED", "color": "red" }, "1": { "text": "ONLINE", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "title": "6. Ocupación Real de Tablespaces % (Con AUTOEXTEND MAXBYTES)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "oratui_tablespace_used_percent",
+          "legendFormat": "{{tablespace}} ({{type}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "7. Uso de ASM Diskgroups % & Fast Recovery Area (FRA) %",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "oratui_asm_diskgroup_used_percent", "legendFormat": "ASM {{diskgroup}} ({{redundancy}})" },
+        { "expr": "oratui_instance_fra_used_percent", "legendFormat": "FRA {{instance}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "8. Servidor Linux: CPU Load %, RAM Física %, Swap %, HugePages % & Kernel AIO %",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "oratui_os_metric_used_percent",
+          "legendFormat": "[{{category}}] {{component}}: {{current_value}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 75 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "9. Filesystems Montados: Uso de Espacio % vs Uso de Inodos % (Prevención ORA-09925)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "oratui_filesystem_used_percent", "legendFormat": "Espacio {{mountpoint}} ({{fstype}})" },
+        { "expr": "oratui_filesystem_inodes_used_percent", "legendFormat": "Inodos {{mountpoint}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "10. Evolución de Sesiones, Bloqueos TX/TM y Lag de Data Guard",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "oratui_sessions_active_total", "legendFormat": "Sesiones Activas" },
+        { "expr": "oratui_sessions_blocking_locks_total", "legendFormat": "Sesiones Bloqueantes (Locks)" },
+        { "expr": "oratui_dataguard_apply_lag_seconds", "legendFormat": "Data Guard Apply Lag (s) - {{standby_db}}" }
+      ]
+    },
+    {
+      "title": "11. Detalle de Errores ORA-* en Alert Log, Listeners y Backups RMAN",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        { "expr": "oratui_alert_ora_error_count", "legendFormat": "{{error_code}} ({{instance}})" },
+        { "expr": "oratui_listener_up", "legendFormat": "Listener {{listener}} ({{ready_status}})" },
+        { "expr": "oratui_rman_backup_status", "legendFormat": "RMAN {{input_type}} ({{status}})" }
+      ]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["oracle", "rac", "oratui", "opentelemetry", "prometheus", "san", "multipath"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "ORA-TUI :: Oracle RAC, Database, RMAN & Linux/SAN Complete Dashboard",
+  "uid": "oratui-oracle-complete"
+}

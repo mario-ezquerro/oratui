@@ -1,0 +1,152 @@
+groups:
+  - name: oratui_oracle_and_server_alerts
+    interval: 15s
+    rules:
+      # 1. Instancia Oracle Caída o Cerrada
+      - alert: OracleInstanceDown
+        expr: oratui_instance_up < 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Instancia Oracle {{ $labels.instance }} en {{ $labels.host }} NO está OPEN"
+          description: "La instancia {{ $labels.instance }} (BD {{ $labels.db_name }}) en el nodo {{ $labels.node }} está en estado {{ $labels.status }} / {{ $labels.open_mode }}."
+
+      # 2. Nodo del Cluster o Demonio Clusterware Caído (CRS, CSSD, EVMD, ASM)
+      - alert: OracleClusterDaemonDown
+        expr: oratui_cluster_node_up == 0 or oratui_cluster_daemon_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fallo de Clusterware / Demonio en nodo {{ $labels.node }}"
+          description: "El nodo {{ $labels.node }} o su demonio {{ $labels.daemon }} está fuera de línea en el cluster {{ $labels.cluster }}."
+
+      # 3. PDB Cerrada (MOUNTED)
+      - alert: OraclePDBNotOpen
+        expr: oratui_pdb_up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pluggable Database (PDB) {{ $labels.pdb }} cerrada en {{ $labels.host }}"
+          description: "La PDB {{ $labels.pdb }} se encuentra en modo {{ $labels.open_mode }}."
+
+      # 4. Tablespace > 85% (Warning) y > 92% (Critical considerando AUTOEXTEND MAXBYTES)
+      - alert: OracleTablespaceWarning
+        expr: oratui_tablespace_used_percent >= 85 and oratui_tablespace_used_percent < 92
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tablespace {{ $labels.tablespace }} al {{ $value }}% en {{ $labels.host }}"
+          description: "El tablespace {{ $labels.tablespace }} ha superado el 85% de su capacidad máxima real (AUTOEXTEND={{ $labels.autoextend }})."
+
+      - alert: OracleTablespaceCritical
+        expr: oratui_tablespace_used_percent >= 92
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "URGENTE: Tablespace {{ $labels.tablespace }} al {{ $value }}% (Riesgo ORA-01653/ORA-01654)"
+          description: "El tablespace {{ $labels.tablespace }} en {{ $labels.host }} está casi lleno ({{ $value }}%). Añada un datafile o amplíe MAXSIZE."
+
+      # 5. Fast Recovery Area (FRA) Llena (> 85%)
+      - alert: OracleFRASpaceCritical
+        expr: oratui_instance_fra_used_percent >= 85
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fast Recovery Area (FRA) al {{ $value }}% en instancia {{ $labels.instance }}"
+          description: "Riesgo de bloqueo de archivado (ORA-19809 / ORA-19815). Lance backup de Archivelogs con DELETE INPUT."
+
+      # 6. Bloqueos de Sesión Activos (TX / TM Locks)
+      - alert: OracleBlockingSessionsDetected
+        expr: oratui_sessions_blocking_locks_total > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} sesiones bloqueantes (Locks TX/TM) en {{ $labels.host }}"
+          description: "Existen sesiones bloqueando transacciones en {{ $labels.host }} durante más de 2 minutos."
+
+      # 7. ASM Diskgroup Crítico o con Discos Offline
+      - alert: OracleASMDiskgroupCritical
+        expr: oratui_asm_diskgroup_used_percent >= 88 or oratui_asm_diskgroup_offline_disks > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alerta en ASM Diskgroup {{ $labels.diskgroup }} en {{ $labels.host }}"
+          description: "El Diskgroup ASM {{ $labels.diskgroup }} tiene uso {{ $value }}% o discos OFFLINE."
+
+      # 8. Listener Oracle Caído
+      - alert: OracleListenerDown
+        expr: oratui_listener_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Listener Oracle {{ $labels.listener }} CAÍDO en {{ $labels.host }}"
+          description: "El listener {{ $labels.listener }} ({{ $labels.endpoint }}) no responde."
+
+      # 9. Errores ORA-* en el Alert Log
+      - alert: OracleAlertLogORAError
+        expr: oratui_alert_ora_errors_total > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} errores ORA-* detectados en el Alert Log de {{ $labels.host }}"
+          description: "Revise el módulo 7 (Alert Log) en ora-tui o el panel de Grafana para ver el código ORA- exacto."
+
+      # 10. Backup RMAN Fallido
+      - alert: OracleRMANBackupFailed
+        expr: oratui_rman_backup_status == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fallo de Backup RMAN ({{ $labels.input_type }}) en {{ $labels.host }}"
+          description: "El trabajo RMAN {{ $labels.session_key }} ({{ $labels.input_type }}) finalizó en estado {{ $labels.status }}."
+
+      # 11. Data Guard Standby MRP0 Detenido o con Retraso (Lag > 300s)
+      - alert: OracleDataGuardSyncIssue
+        expr: oratui_dataguard_mrp_up == 0 or oratui_dataguard_apply_lag_seconds > 300
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fallo o retraso en Standby Data Guard {{ $labels.standby_db }}"
+          description: "MRP0 detenido o Apply Lag superior a 5 minutos en {{ $labels.standby_db }} ({{ $labels.standby_host }})."
+
+      # 12. Servidor Linux: Carga CPU, RAM, Swap, THP o Kernel AIO en Warning/Critical
+      - alert: LinuxServerHealthDegraded
+        expr: oratui_os_metric_healthy == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Métrica de servidor Linux en alerta: {{ $labels.category }} - {{ $labels.component }} ({{ $labels.host }})"
+          description: "El subsistema {{ $labels.component }} en {{ $labels.host }} reporta estado {{ $labels.status }}."
+
+      # 13. Filesystem Lleno (> 90%) o Agotamiento de Inodos (> 85% -> Riesgo ORA-09925)
+      - alert: LinuxFilesystemOrInodesCritical
+        expr: oratui_filesystem_used_percent >= 90 or oratui_filesystem_inodes_used_percent >= 85
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Filesystem {{ $labels.mountpoint }} crítico en {{ $labels.host }} (Espacio o Inodos)"
+          description: "El punto de montaje {{ $labels.mountpoint }} ({{ $labels.device }}) supera el umbral crítico de espacio o inodos (riesgo ORA-09925)."
+
+      # 14. Pérdida de Camino SAN Multipath / HBA Fibre Channel / Disco de Bloque
+      - alert: LinuxSANMultipathPathDown
+        expr: oratui_storage_path_healthy == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Camino SAN Multipath o HBA degradado: {{ $labels.name }} en {{ $labels.host }}"
+          description: "El dispositivo {{ $labels.name }} ({{ $labels.type }}) presenta caminos caídos: {{ $labels.paths_summary }}."

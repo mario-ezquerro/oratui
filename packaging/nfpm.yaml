@@ -1,16 +1,16 @@
 name: "ora-tui"
 arch: "amd64"
 platform: "linux"
-version: "1.4.0"
+version: "1.5.0"
 release: "1"
 section: "database"
 priority: "optional"
 maintainer: "Mario <mario@ora-tui.local>"
 description: |
-  Interactive Terminal User Interface (TUI) for Oracle RAC, Restart, and Single Instance
-  health monitoring, session analysis, tablespace/table management, and safe cluster maintenance.
+  Interactive Terminal User Interface (TUI) & OpenTelemetry/Prometheus Exporter for Oracle RAC,
+  Restart, Single Instance, ASM, RMAN, Data Guard, Alert Log, and Linux Server/SAN Multipath.
 vendor: "ora-tui"
-homepage: "https://github.com/mario/ora-tui"
+homepage: "https://github.com/mario-ezquerro/oratui"
 license: "Apache-2.0"
 
 contents:
@@ -25,5 +25,35 @@ contents:
     type: config|noreplace
     file_info:
       mode: 0440
+      owner: root
+      group: root
+  - src: ./packaging/ora-tui-otel.service
+    dst: /usr/lib/systemd/system/ora-tui-otel.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./monitoring/prometheus/prometheus.yml
+    dst: /usr/share/ora-tui/monitoring/prometheus/prometheus.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./monitoring/prometheus/oracle_alerts.yml
+    dst: /usr/share/ora-tui/monitoring/prometheus/oracle_alerts.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./monitoring/grafana/oratui_dashboard.json
+    dst: /usr/share/ora-tui/monitoring/grafana/oratui_dashboard.json
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./monitoring/docker-compose.yml
+    dst: /usr/share/ora-tui/monitoring/docker-compose.yml
+    file_info:
+      mode: 0644
       owner: root
       group: root
