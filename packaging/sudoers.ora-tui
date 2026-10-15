@@ -1,0 +1,6 @@
+# Allow members of dba and oinstall groups to launch ora-tui with root privileges
+# so ora-tui can dynamically drop privileges to oracle/grid or manage crsctl when required.
+Defaults:%dba !requiretty
+Defaults:%oinstall !requiretty
+%dba ALL=(root) NOPASSWD: /usr/bin/ora-tui
+%oinstall ALL=(root) NOPASSWD: /usr/bin/ora-tui

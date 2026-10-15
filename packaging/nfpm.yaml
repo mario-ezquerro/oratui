@@ -1,0 +1,29 @@
+name: "ora-tui"
+arch: "amd64"
+platform: "linux"
+version: "1.0.0"
+release: "1"
+section: "database"
+priority: "optional"
+maintainer: "Mario <mario@ora-tui.local>"
+description: |
+  Interactive Terminal User Interface (TUI) for Oracle RAC, Restart, and Single Instance
+  health monitoring, session analysis, tablespace/table management, and safe cluster maintenance.
+vendor: "ora-tui"
+homepage: "https://github.com/mario/ora-tui"
+license: "Apache-2.0"
+
+contents:
+  - src: ./bin/ora-tui-linux-amd64
+    dst: /usr/bin/ora-tui
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: ./packaging/sudoers.ora-tui
+    dst: /etc/sudoers.d/ora-tui
+    type: config|noreplace
+    file_info:
+      mode: 0440
+      owner: root
+      group: root
