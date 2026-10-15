@@ -49,6 +49,7 @@ func CollectLiveEnvironment(ctx context.Context, runner *executor.Runner) (*mode
 	diskgroups, tablespaces, datafiles, segments, invalidObjs := CollectStorage(ctx, runner, env, activeSID)
 	rmanBackups, restorePoints, alertEntries, alertTail, traceDir, alertSizeMB := CollectRMANDiag(ctx, runner, env, activeSID)
 	listeners := CollectNetwork(ctx, runner, env, crsResources)
+	osMetrics, filesystems, storagePaths := CollectOSHealth(ctx, runner, env)
 
 	clusterName := "N/A (Single Instance)"
 	if env.Topology == model.ModeRAC {
@@ -87,6 +88,9 @@ func CollectLiveEnvironment(ctx context.Context, runner *executor.Runner) (*mode
 		AlertTailLines:  alertTail,
 		DiagTraceDir:    traceDir,
 		AlertFileSizeMB: alertSizeMB,
+		OSMetrics:       osMetrics,
+		Filesystems:     filesystems,
+		StoragePaths:    storagePaths,
 	}
 
 	return state, env, nil

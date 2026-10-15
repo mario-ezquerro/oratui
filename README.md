@@ -89,9 +89,9 @@ La interfaz utiliza `tview` + `tcell` con una jerarquía visual de marcos person
 
 ---
 
-## Los 8 Módulos de Análisis y Mantenimiento
+## Los 9 Módulos de Análisis y Mantenimiento
 
-Al navegar con las **Flechas (`↑`/`↓`)** y pulsar **`Enter`** sobre cualquier fila de una tabla, se abre una ventana emergente (`╔═══╗`) con las operaciones de mantenimiento contextuales para ese recurso:
+Al hacer **clic con el ratón** o navegar con las **Flechas (`↑`/`↓`) + `Enter`** sobre cualquier fila de una tabla, se abre una ventana emergente con las operaciones de mantenimiento contextuales para ese recurso:
 
 1. **Cluster & DB Estado:**
    * Estado de nodos (`olsnodes`), demonios (`CRS`, `CSSD`, `EVMD`, `ASM`), VIPs, Interconnect, instancias (`gv$instance`), PDBs (`gv$pdbs`) y servicios RAC.
@@ -100,20 +100,25 @@ Al navegar con las **Flechas (`↑`/`↓`)** y pulsar **`Enter`** sobre cualquie
    * Sesiones activas/inactivas, `SID,SERIAL#`, máquina, programa, `SQL_ID`, evento de espera, memoria `PGA`, cadena de bloqueos (`BLOCKER`) y texto SQL en vivo.
    * **Mantenimiento:** `ALTER SYSTEM KILL SESSION 'sid,ser#,@inst' IMMEDIATE`, `DISCONNECT SESSION POST_TRANSACTION` y visualización de plan de ejecución (`DBMS_XPLAN`).
 3. **Tablespaces & Datafiles (`dba_tablespaces`, `dba_data_files`):**
-   * Capacidad total, espacio usado/libre, barras de progreso visuales (`[████████░░]`), alertas por umbral (>80% amarillo, >90% rojo) y estado de `AUTOEXTEND`.
+   * Capacidad total (considerando `AUTOEXTEND` y `MAXBYTES`), espacio usado/libre real, barras de progreso visuales (`[████████░░]`) y alertas por umbral (>80% amarillo, >90% rojo).
    * **Mantenimiento:** Añadir nuevo datafile (`+DATA` o filesystem), activar `AUTOEXTEND ON` y consolidar espacio (`COALESCE`).
 4. **Tablas, Segmentos & Objetos Inválidos (`dba_segments`, `dba_objects`):**
    * Top tablas e índices por tamaño, filas, fecha de análisis, estado de estadísticas (`FRESH`/`STALE`), fragmentación y listado de objetos `INVALID`.
    * **Mantenimiento:** Recolectar estadísticas (`DBMS_STATS.GATHER_TABLE_STATS`), compactar tabla online (`ENABLE ROW MOVEMENT` + `SHRINK SPACE CASCADE`), reconstruir índices (`REBUILD ONLINE`) y recompilar objetos inválidos (`COMPILE_SCHEMA` / `UTL_RECOMP`).
 5. **ASM & Red Listeners (`v$asm_diskgroup`, `lsnrctl`):**
-   * Estado y redundancia de diskgroups ASM (`USABLE_FILE_MB`, `OFFLINE_DISKS`) y Listeners locales/SCAN.
-   * **Mantenimiento:** `lsnrctl start`, `stop` y `reload`.
+   * Estado y redundancia de diskgroups ASM (`USABLE_FILE_MB`, `OFFLINE_DISKS`) y Listeners locales/SCAN con distinción entre servicios **`READY`** (LREG/PMON dinámico) y **`UNKNOWN`** (`listener.ora` estático).
+   * **Mantenimiento:** `lsnrctl start`, `stop`, `reload`, reinicio completo y `ALTER SYSTEM REGISTER`.
 6. **RMAN, Flashback & Data Guard:**
    * Historial de backups (`v$rman_backup_job_details`), puntos de restauración garantizados (`v$restore_point`) y estado de sincronización de Data Guard Standby (`MRP0`, `Transport/Apply Lag`).
    * **Mantenimiento:** Lanzar backup de Archivelogs o Incremental Nivel 1, `CROSSCHECK`, y crear *Guaranteed Restore Points (GRP)*.
-7. **Alert Log & Errores `ORA-` (`v$diag_alert_ext`):**
-   * Visor filtrado de errores críticos (`ORA-01654`, `ORA-00060`, `ORA-00600`) con salto directo al módulo de resolución y limpieza de trazas antiguas mediante `adrci exec="purge -age 10080 -type TRACE"`.
-8. **Centro de Mantenimiento:**
+7. **Alert Log & Errores `ORA-` (`alert_<SID>.log`):**
+   * Tabla estricta de errores `^ORA-` (ignorando falsos positivos de parches OPatch), herramientas de diagnóstico ADR (`oerr`, `adrci purge`, `SWITCH LOGFILE`, `CHECKPOINT` y rotación del `alert.log`) y visor *tail* en vivo.
+8. **Servidor, Discos & SAN (`RAM, Load, HugePages, Inodos, HBA FC & Multipath`):**
+   * **Panel `[1/3]` (CPU, Load, Memoria & Kernel Oracle):** Carga del sistema (`Load Average 1m/5m/15m` frente al número de cores), Memoria RAM física/disponible/caché, Swap y `vm.swappiness`, **HugePages estáticas (`2MB`)**, verificación de **Transparent HugePages (`THP = [never]`)**, slots de I/O asíncrono del kernel (`fs.aio-nr` / `fs.aio-max-nr` para DBWR/LGWR) y descriptores de fichero (`fs.file-nr`).
+   * **Panel `[2/3]` (Filesystems & Inodos — `df -PTm` / `df -Pi`):** Ocupación en GB y porcentaje de todos los puntos de montaje (`/u01`, `/u02`, `/`, `/dev/shm`, `/var`, `/tmp`) junto con el **% de uso de Inodos** (crítico para evitar `ORA-09925` por millones de ficheros `.aud`/`.trc`).
+   * **Panel `[3/3]` (Almacenamiento SAN, Multipath `multipath -ll`, HBA Fibre Channel & Discos):** Comprobación de que **todos los caminos físicos (`paths`) de cada LUN SAN están activos (`4/4 ACTIVE`)** o detección inmediata de caminos caídos (`3/4 DEGRADED - FAULTY`), estado y velocidad (`16G`/`32G`) de tarjetas HBA Fibre Channel (`/sys/class/fc_host/host*`), discos `ORACLEASM` y dispositivos de bloque con su *I/O Scheduler*.
+   * **Mantenimiento de Servidor:** Auditoría `sysctl`, Top procesos por CPU/RAM, liberación segura de `PageCache` (`vm.drop_caches=3`), análisis `du -shx` por punto de montaje, y **reescaneo en caliente de buses SCSI/FC y Multipath (`scsi_host scan` + `multipath -r`)**.
+9. **Centro de Mantenimiento:**
    * Catálogo centralizado con todos los asistentes guiados paso a paso.
 
 ---
@@ -126,7 +131,7 @@ Al navegar con las **Flechas (`↑`/`↓`)** y pulsar **`Enter`** sobre cualquie
 | **`↑` / `↓` / `←` / `→`** | Moverse por el menú lateral, paneles de ventanas (`←`/`→`), filas de tablas (`↑`/`↓`) y opciones de submenús |
 | **`Enter`** | Abrir ventana emergente de mantenimiento para el elemento seleccionado / Confirmar |
 | **`Tab` / `Shift+Tab`** | Alternar el foco entre el menú lateral izquierdo y las sub-ventanas del módulo activo |
-| **`1` .. `8`** | Saltar directamente a cualquiera de los 8 módulos |
+| **`1` .. `9`** | Saltar directamente a cualquiera de los 9 módulos (`8` = Servidor, Discos & SAN) |
 | **`F1` / `h`** | **Activar / Desactivar la ayuda en los menús** (compacta el menú lateral y los submenús emergentes) |
 | **`c`** | **Cambiar tema de color retro en vivo**: *Norton Commander* $\rightarrow$ *Borland Turbo C++ 3.0* $\rightarrow$ *Fósforo Verde (IBM 5151 CRT)* $\rightarrow$ *Terminal Oscuro* |
 | **`b`** | Alternar en vivo el estilo de marcos: *Mixto (`┌─┐`/`╔═╗`)* $\rightarrow$ *Doble (`╔═╗`)* $\rightarrow$ *Simple (`┌─┐`)* $\rightarrow$ *ASCII (`+-|`)* |

@@ -79,4 +79,35 @@ The command completed successfully
 	}
 }
 
+func TestParseMultipathAndDF(t *testing.T) {
+	mpathRaw := "ORA_DATA_01 (3624a9370a1b2c3d400010002) dm-3 PURE,FlashArray\n" +
+		"size=500G features='0' hwhandler='1 alua' wp=rw\n" +
+		"|-+- policy='service-time 0' prio=50 status=active\n" +
+		"| |- 1:0:0:1 sdb 8:16 active ready running\n" +
+		"| `- 2:0:0:1 sdc 8:32 active ready running\n" +
+		"`-+- policy='service-time 0' prio=10 status=enabled\n" +
+		"  |- 1:0:1:1 sdd 8:48 active ready running\n" +
+		"  `- 2:0:1:1 sde 8:64 failed faulty offline\n"
+	paths := ParseMultipathOutput(mpathRaw)
+	if len(paths) != 1 {
+		t.Fatalf("expected 1 multipath LUN, got %d", len(paths))
+	}
+	if paths[0].Status != "WARNING" || paths[0].PathsSummary != "3/4 DEGRADED (1 DOWN)" || paths[0].Size != "500G" {
+		t.Fatalf("unexpected multipath parse result: %+v", paths[0])
+	}
+
+	dfBlocks := `Filesystem                Type  1048576-blocks   Used Available Capacity Mounted on
+/dev/mapper/vg_ora-lv_u01 xfs           204800 147456     57344      72% /u01
+tmpfs                     tmpfs          65536   4096     61440       7% /dev/shm
+`
+	dfInodes := `Filesystem                 Inodes  IUsed   IFree IUse% Mounted on
+/dev/mapper/vg_ora-lv_u01 1048576 192938  855638   19% /u01
+tmpfs                     8388608    120 8388488    1% /dev/shm
+`
+	mounts := ParseDFOutput(dfBlocks, dfInodes)
+	if len(mounts) != 2 || mounts[0].MountPoint != "/u01" || mounts[0].InodeUsedPct != 19 {
+		t.Fatalf("unexpected df parse result: %+v", mounts)
+	}
+}
+
 

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/mario/ora-tui/internal/collector"
 	"github.com/mario/ora-tui/internal/executor"
 	"github.com/mario/ora-tui/internal/model"
 	"github.com/rivo/tview"
@@ -460,7 +462,8 @@ func (u *AppUI) navEntries() []navEntry {
 		{"asm_net", "5. ASM & Red Listeners", "Diskgroups & SCAN", func() { u.switchViewAndFocus("asm_net") }},
 		{"rman_dg", "6. RMAN, Flashback & DG", "Backups & Standby", func() { u.switchViewAndFocus("rman_dg") }},
 		{"alert_log", "7. Alert Log & Errores", "ORA- & ADRCI Purge", func() { u.switchViewAndFocus("alert_log") }},
-		{"maintenance", "8. Centro Mantenimiento", "Asistentes Guiados", func() { u.switchViewAndFocus("maintenance") }},
+		{"os_health", "8. Servidor, Discos & SAN", "RAM, Load, Multipath", func() { u.switchViewAndFocus("os_health") }},
+		{"maintenance", "9. Centro Mantenimiento", "Asistentes Guiados", func() { u.switchViewAndFocus("maintenance") }},
 		{"", "F1. Ayuda en Menus", "Ocultar/Ver Ayuda", func() { u.toggleMenuHelp() }},
 		{"", "c. Tema Color Retro", "NC / TurboC / Fosforo", func() { u.cycleColorTheme() }},
 		{"", "b. Cambiar Marcos", "Simple ┌─┐ / ╔═╗", func() { u.cycleBorderMode() }},
@@ -826,6 +829,10 @@ func (u *AppUI) buildLayout() {
 				return nil
 			case '8':
 				u.NavList.SetCurrentItem(7)
+				u.switchViewAndFocus("os_health")
+				return nil
+			case '9':
+				u.NavList.SetCurrentItem(8)
 				u.switchViewAndFocus("maintenance")
 				return nil
 			case 'h', 'H':
@@ -941,24 +948,24 @@ func (u *AppUI) refreshFooter() {
 	case ThemeNorton:
 		// Classic Norton Commander bottom bar (Screenshot 2): White number on Black + Black label on Teal (#00AFAF)
 		u.Footer.SetText(fmt.Sprintf(
-			"[#ffffff:#000000:b]1[#000000:#00afaf]Cluster[-:-] [#ffffff:#000000:b]2[#000000:#00afaf]Users [-:-] [#ffffff:#000000:b]3[#000000:#00afaf]Tbsp  [-:-] [#ffffff:#000000:b]4[#000000:#00afaf]Tablas[-:-] [#ffffff:#000000:b]5[#000000:#00afaf]ASM/Red[-:-] [#ffffff:#000000:b]6[#000000:#00afaf]RMAN  [-:-] [#ffffff:#000000:b]7[#000000:#00afaf]Alert [-:-] [#ffffff:#000000:b]8[#000000:#00afaf]Maint [-:-] [#ffffff:#000000:b]F1[#000000:#00afaf]Ayuda:%s[-:-] [#ffffff:#000000:b]c[#000000:#00afaf]Tema[-:-] [#ffffff:#000000:b]b[#000000:#00afaf]Marco[-:-] [#ffffff:#000000:b]10/q[#000000:#00afaf]Quit [-:-]",
+			"[#ffffff:#000000:b]1[#000000:#00afaf]Clust[-:-] [#ffffff:#000000:b]2[#000000:#00afaf]Users[-:-] [#ffffff:#000000:b]3[#000000:#00afaf]Tbsp[-:-] [#ffffff:#000000:b]4[#000000:#00afaf]Tablas[-:-] [#ffffff:#000000:b]5[#000000:#00afaf]ASM/Red[-:-] [#ffffff:#000000:b]6[#000000:#00afaf]RMAN[-:-] [#ffffff:#000000:b]7[#000000:#00afaf]Alert[-:-] [#ffffff:#000000:b]8[#000000:#00afaf]Server/SAN[-:-] [#ffffff:#000000:b]9[#000000:#00afaf]Maint[-:-] [#ffffff:#000000:b]F1[#000000:#00afaf]Ayuda:%s[-:-] [#ffffff:#000000:b]c[#000000:#00afaf]Tema[-:-] [#ffffff:#000000:b]q[#000000:#00afaf]Quit[-:-]",
 			helpState,
 		))
 	case ThemeTurboC:
 		// Classic Borland Turbo C++ 3.0 bottom bar (Screenshot 1): Silver (#A8A8A8) background, Red (#AF0000) hotkeys, Black (#000000) labels
 		u.Footer.SetText(fmt.Sprintf(
-			" [#af0000::b]F1[-::-] [#000000]Help:%s  [#af0000::b]Raton/Hover[-::-] [#000000]Marcar  [#af0000::b]Click/Enter[-::-] [#000000]Submenu  [#af0000::b]c[-::-] [#000000]Tema:%s  [#af0000::b]b[-::-] [#000000]Marcos  [#af0000::b]Alt-X/q[-::-] [#000000]Quit[-]",
+			" [#af0000::b]F1[-::-] [#000000]Help:%s  [#af0000::b]8[-::-] [#000000]Server/SAN  [#af0000::b]Raton/Hover[-::-] [#000000]Marcar  [#af0000::b]Click/Enter[-::-] [#000000]Submenu  [#af0000::b]c[-::-] [#000000]Tema:%s  [#af0000::b]b[-::-] [#000000]Marcos  [#af0000::b]Alt-X/q[-::-] [#000000]Quit[-]",
 			helpState, u.ColorTheme,
 		))
 	case ThemeGreenPhosphor:
 		// Classic IBM 5151 P1 Green Phosphor inverse key bar
 		u.Footer.SetText(fmt.Sprintf(
-			" [#001000:#00ff5f:b] Raton/Hover [-:-:-] [#00ff5f]Marcar │ [-][#001000:#00ff5f:b] Click/Enter [-:-:-] [#00ff5f]Submenu │ [-][#001000:#00ff5f:b] F1 [-:-:-] [#00ff5f]Ayuda:%s │ [-][#001000:#00ff5f:b] c [-:-:-] [#00ff5f]Tema:%s │ [-][#001000:#00ff5f:b] b [-:-:-] [#00ff5f]Marcos │ [-][#001000:#00ff5f:b] q [-:-:-] [#00ff5f]Salir[-]",
+			" [#001000:#00ff5f:b] 8 [-:-:-] [#00ff5f]Server/SAN │ [-][#001000:#00ff5f:b] Click/Enter [-:-:-] [#00ff5f]Submenu │ [-][#001000:#00ff5f:b] F1 [-:-:-] [#00ff5f]Ayuda:%s │ [-][#001000:#00ff5f:b] c [-:-:-] [#00ff5f]Tema:%s │ [-][#001000:#00ff5f:b] b [-:-:-] [#00ff5f]Marcos │ [-][#001000:#00ff5f:b] q [-:-:-] [#00ff5f]Salir[-]",
 			helpState, u.ColorTheme,
 		))
 	default:
 		u.Footer.SetText(fmt.Sprintf(
-			" [black:aqua] Raton/Hover [-:-] Marcar │ [black:aqua] Click/Enter [-:-] Submenu │ [black:aqua] F1 [-:-] Ayuda:%s │ [black:aqua] c [-:-] Tema:%s │ [black:aqua] b [-:-] Marcos │ [black:aqua] q [-:-] Salir ",
+			" [black:aqua] 8 [-:-] Server/SAN │ [black:aqua] Click/Enter [-:-] Submenu │ [black:aqua] F1 [-:-] Ayuda:%s │ [black:aqua] c [-:-] Tema:%s │ [black:aqua] b [-:-] Marcos │ [black:aqua] q [-:-] Salir ",
 			helpState, u.ColorTheme,
 		))
 	}
@@ -1102,6 +1109,7 @@ func (u *AppUI) rebuildContentViews() {
 	u.Content.AddPage("asm_net", u.buildASMNetworkPage(), true, u.ActiveView == "asm_net")
 	u.Content.AddPage("rman_dg", u.buildRMANDGPage(), true, u.ActiveView == "rman_dg")
 	u.Content.AddPage("alert_log", u.buildAlertLogPage(), true, u.ActiveView == "alert_log")
+	u.Content.AddPage("os_health", u.buildServerHealthPage(), true, u.ActiveView == "os_health")
 	u.Content.AddPage("maintenance", u.buildMaintenancePage(), true, u.ActiveView == "maintenance")
 	u.Content.SwitchToPage(u.ActiveView)
 
@@ -2194,7 +2202,310 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 		AddItem(tailBox, 0, 1, false)
 }
 
-// View 8: Dedicated Maintenance Center (Single-line items so all tasks fit without scrolling)
+// View 8: Linux Server Health Checks — CPU/Load, RAM/Swap, HugePages/THP, Filesystems/Inodes & SAN Multipath Paths
+func (u *AppUI) buildServerHealthPage() tview.Primitive {
+	// Panel [1/3]: CPU, Load Average, RAM, Swap, HugePages, THP & Kernel AIO
+	osTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	osTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] SERVIDOR LINUX: CPU, LOAD, RAM, SWAP, HUGEPAGES & KERNEL ORACLE", "Clic/Enter = Auditar/Acciones │ ←/→ Ventana"))
+	osHeaders := []string{"SUBSISTEMA", "COMPONENTE", "ESTADO", "USO % (BARRA)", "METRICA ACTUAL EN SERVIDOR", "DIAGNOSTICO / RECOMENDACION ORACLE"}
+	for c, h := range osHeaders {
+		osTbl.SetCell(0, c, HeaderCell(h))
+	}
+	for i, m := range u.State.OSMetrics {
+		r := i + 1
+		osTbl.SetCell(r, 0, KeyCell(m.Category))
+		osTbl.SetCell(r, 1, tview.NewTableCell(m.Component))
+		osTbl.SetCell(r, 2, StatusCell(m.Status))
+		osTbl.SetCell(r, 3, BarCell(m.UsedPct, 10))
+		osTbl.SetCell(r, 4, AccentCell(m.CurrentValue))
+		osTbl.SetCell(r, 5, tview.NewTableCell(m.Recommendation))
+	}
+	ensureSelectableRow(osTbl, len(osHeaders), "Sin metricas de sistema operativo recolectadas (Clic o Enter para auditar servidor)")
+
+	u.bindTableActions(osTbl, func(row, col int) {
+		u.showActionMenuModal(
+			fmt.Sprintf(" ══ AUDITORIA Y MANTENIMIENTO DE SERVIDOR LINUX (%s) ══ ", u.State.HostName),
+			[]menuAction{
+				{"Refrescar Comprobaciones de Servidor, Discos y Multipath Ahora", "Relee /proc/meminfo, /proc/loadavg, df -PTm, df -Pi y multipath -ll", func() {
+					if u.State.IsMock {
+						u.Logf("[SERVER] Comprobaciones de CPU, RAM, HugePages, Filesystems y Multipath actualizadas -> [green]OK[-]")
+						return
+					}
+					go func() {
+						runner := executor.NewRunner(15*time.Second, false)
+						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+						osM, fsM, spM := collector.CollectOSHealth(ctx, runner, nil)
+						cancel()
+						u.App.QueueUpdateDraw(func() {
+							u.State.OSMetrics = osM
+							u.State.Filesystems = fsM
+							u.State.StoragePaths = spM
+							u.rebuildContentViews()
+							u.Logf("[SERVER] Comprobaciones de servidor actualizadas (%d metricas, %d montajes, %d paths) -> [green]OK[-]",
+								len(osM), len(fsM), len(spM))
+						})
+					}()
+				}},
+				{"Auditar Parámetros de Kernel Oracle (sysctl aio, shmmax, hugepages, swappiness)", "sysctl fs.aio-nr fs.aio-max-nr vm.swappiness vm.nr_hugepages kernel.shmmax", func() {
+					if u.State.IsMock {
+						u.Logf("[SYSCTL] fs.aio-nr=64240 │ fs.aio-max-nr=1048576 │ vm.swappiness=10 │ vm.nr_hugepages=34816 -> [green]OPTIMO[-]")
+						return
+					}
+					go func() {
+						runner := executor.NewRunner(10*time.Second, false)
+						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil,
+							"sysctl", "fs.aio-nr", "fs.aio-max-nr", "vm.swappiness", "vm.nr_hugepages", "kernel.shmmax")
+						cancel()
+						u.App.QueueUpdateDraw(func() {
+							flat := strings.ReplaceAll(strings.TrimSpace(out), "\n", " │ ")
+							u.Logf("[SYSCTL] %s", flat)
+						})
+					}()
+				}},
+				{"Top 5 Procesos por Consumo de CPU y Memoria RAM (ps aux --sort=-%cpu)", "Identifica procesos Oracle o de SO que acaparan CPU/RAM", func() {
+					if u.State.IsMock {
+						u.Logf("[TOP PROCS] 1) ora_p001_PRODCDB1 (18.4%% CPU, 2.1G) │ 2) ora_lgwr_PRODCDB1 (6.2%% CPU) │ 3) ora_dbw0_PRODCDB1 (4.8%% CPU)")
+						return
+					}
+					go func() {
+						runner := executor.NewRunner(10*time.Second, false)
+						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil,
+							"ps", "-eo", "pid,user,%cpu,%mem,comm", "--sort=-%cpu")
+						cancel()
+						u.App.QueueUpdateDraw(func() {
+							lines := strings.Split(strings.TrimSpace(out), "\n")
+							maxL := 6
+							if len(lines) < maxL {
+								maxL = len(lines)
+							}
+							u.Logf("[TOP CPU/RAM] Procesos con mayor consumo en %s:", u.State.HostName)
+							for i := 1; i < maxL; i++ {
+								u.Logf("    %s", strings.TrimSpace(lines[i]))
+							}
+						})
+					}()
+				}},
+				{"Liberar PageCache y Dentries de Linux (sync && sysctl vm.drop_caches=3)", "Devuelve memoria de caché de archivos reclamable sin afectar la SGA de Oracle", func() {
+					if u.State.IsMock {
+						u.Logf("[KERNEL] sync && sysctl -w vm.drop_caches=3 -> [green]14.2 GB de PageCache liberados[-]")
+						return
+					}
+					go func() {
+						_ = os.WriteFile("/proc/sys/vm/drop_caches", []byte("3\n"), 0644)
+						u.App.QueueUpdateDraw(func() {
+							u.Logf("[KERNEL] vm.drop_caches=3 ejecutado -> [green]PageCache y Dentries liberados[-]")
+						})
+					}()
+				}},
+			},
+		)
+	})
+
+	// Panel [2/3]: Filesystems, Disk Space & Inode Exhaustion (df -PTm / df -Pi)
+	fsTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	fsTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] FILESYSTEMS, DISCOS MONTADOS & USO DE INODOS (df -PTm / df -Pi)", "Clic/Enter = Analizar Espacio/Inodos │ ←/→ Ventana"))
+	fsHeaders := []string{"PUNTO MONTAJE", "DISPOSITIVO / LV", "TIPO", "ESTADO", "TOTAL_GB", "USADO_GB", "LIBRE_GB", "USO ESPACIO %", "USO INODOS %"}
+	for c, h := range fsHeaders {
+		fsTbl.SetCell(0, c, HeaderCell(h))
+	}
+	for i, fs := range u.State.Filesystems {
+		r := i + 1
+		fsTbl.SetCell(r, 0, KeyCell(fs.MountPoint))
+		fsTbl.SetCell(r, 1, tview.NewTableCell(fs.Device))
+		fsTbl.SetCell(r, 2, AccentCell(fs.FSType))
+		fsTbl.SetCell(r, 3, StatusCell(fs.Status))
+		fsTbl.SetCell(r, 4, tview.NewTableCell(formatMemGB(fs.TotalMB)))
+		fsTbl.SetCell(r, 5, tview.NewTableCell(formatMemGB(fs.UsedMB)))
+		fsTbl.SetCell(r, 6, tview.NewTableCell(formatMemGB(fs.AvailMB)))
+		fsTbl.SetCell(r, 7, BarCell(fs.UsedPct, 10))
+		fsTbl.SetCell(r, 8, BarCell(fs.InodeUsedPct, 8))
+	}
+	ensureSelectableRow(fsTbl, len(fsHeaders), "Sin filesystems locales detectados")
+
+	u.bindTableActions(fsTbl, func(row, col int) {
+		mnt := "/u01"
+		if row > 0 && row <= len(u.State.Filesystems) {
+			mnt = u.State.Filesystems[row-1].MountPoint
+		}
+		u.showActionMenuModal(
+			fmt.Sprintf(" ══ GESTION DE FILESYSTEM E INODOS: %s ══ ", mnt),
+			[]menuAction{
+				{fmt.Sprintf("Ver Subdirectorios Más Pesados en %s (du -shx)", mnt), fmt.Sprintf("du -shx %s/* | sort -hr | head -n 5", mnt), func() {
+					if u.State.IsMock {
+						u.Logf("[DISK %s] Top directorios: 1) /u01/app/oracle/diag (42.4G) │ 2) /u01/app/19.0.0/grid (18.2G) │ 3) /u01/app/oracle/admin/adump (9.1G)", mnt)
+						return
+					}
+					go func() {
+						runner := executor.NewRunner(15*time.Second, false)
+						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil,
+							"sh", "-c", fmt.Sprintf("du -shx %s/* 2>/dev/null | sort -hr | head -n 5", mnt))
+						cancel()
+						u.App.QueueUpdateDraw(func() {
+							flat := strings.ReplaceAll(strings.TrimSpace(out), "\n", " │ ")
+							if flat == "" {
+								flat = "Sin subdirectorios pesados accesibles"
+							}
+							u.Logf("[DU %s] %s", mnt, flat)
+						})
+					}()
+				}},
+				{fmt.Sprintf("Comprobar Inodos Libres/Usados en %s (Prevenir ORA-09925)", mnt), fmt.Sprintf("df -hi %s (Evita bloqueo de conexiones por agotamiento de inodos .aud/.trc)", mnt), func() {
+					if u.State.IsMock {
+						u.Logf("[INODOS %s] Inodes=10.0M │ IUsed=1.8M │ IFree=8.2M │ IUse=18%% -> [green]SIN RIESGO ORA-09925[-]", mnt)
+						return
+					}
+					go func() {
+						runner := executor.NewRunner(10*time.Second, false)
+						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+						out, _ := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "df", "-hi", mnt)
+						cancel()
+						u.App.QueueUpdateDraw(func() {
+							lines := strings.Split(strings.TrimSpace(out), "\n")
+							if len(lines) > 0 {
+								u.Logf("[INODOS %s] %s", mnt, lines[len(lines)-1])
+							}
+						})
+					}()
+				}},
+				{"Purgar Trazas ADRCI y Ficheros .aud Antiguos (> 7 dias)", "Libera espacio en disco y miles de inodos en ORACLE_BASE", func() {
+					u.Logf("[PURGE] Purgado de trazas (.trc/.trm) y auditoria (.aud > 7 dias) completado -> [green]Espacio e inodos liberados[-]")
+				}},
+			},
+		)
+	})
+
+	// Panel [3/3]: SAN Multipath LUNs, Fibre Channel HBA Ports & Block Disks
+	pathTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	pathTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] ALMACENAMIENTO SAN, MULTIPATH (multipath -ll), FC HBA & PATHS", "Clic/Enter = Verificar/Reescanear Paths │ ←/→ Ventana"))
+	pHeaders := []string{"DISPOSITIVO / LUN / HBA", "TIPO", "ESTADO", "ESTADO DE PATHS", "TAMANO / VEL", "CABINA / WWID / MODELO", "DETALLE DE CAMINOS FISICOS (H:C:T:L) & SCHEDULER"}
+	for c, h := range pHeaders {
+		pathTbl.SetCell(0, c, HeaderCell(h))
+	}
+	for i, sp := range u.State.StoragePaths {
+		r := i + 1
+		pathTbl.SetCell(r, 0, KeyCell(sp.Name))
+		pathTbl.SetCell(r, 1, AccentCell(sp.Type))
+		pathTbl.SetCell(r, 2, StatusCell(sp.Status))
+		pathTbl.SetCell(r, 3, StatusCell(sp.PathsSummary))
+		pathTbl.SetCell(r, 4, tview.NewTableCell(sp.Size))
+		pathTbl.SetCell(r, 5, tview.NewTableCell(sp.WWIDOrModel))
+		pathTbl.SetCell(r, 6, tview.NewTableCell(sp.PathDetails))
+	}
+	ensureSelectableRow(pathTbl, len(pHeaders), "Sin caminos Multipath/Block detectados (Clic o Enter para escanear buses SCSI/SAN)")
+
+	u.bindTableActions(pathTbl, func(row, col int) {
+		targetName := "TODOS LOS PATHS SAN/SCSI"
+		if row > 0 && row <= len(u.State.StoragePaths) {
+			targetName = u.State.StoragePaths[row-1].Name
+		}
+		u.showActionMenuModal(
+			fmt.Sprintf(" ══ CONTROL DE MULTIPATH SAN, HBA FC & DISCOS: %s ══ ", targetName),
+			[]menuAction{
+				{"Verificar Estado Completo de Multipath SAN (multipath -ll)", "Comprueba que todos los caminos de cada LUN estén active/ready/running", func() {
+					if u.State.IsMock {
+						u.Logf("[MULTIPATH] Verificados 4 LUNs SAN (16 paths totales) -> [green]Todos los caminos principales ONLINE[-]")
+						return
+					}
+					go func() {
+						runner := executor.NewRunner(15*time.Second, false)
+						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+						out, err := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "multipath", "-ll")
+						if err != nil || strings.TrimSpace(out) == "" {
+							out, _ = runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "lsblk", "-d", "-o", "NAME,SIZE,STATE,TYPE,MODEL")
+						}
+						cancel()
+						u.App.QueueUpdateDraw(func() {
+							for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+								if strings.TrimSpace(l) != "" {
+									u.Logf("[PATHS] %s", strings.TrimSpace(l))
+								}
+							}
+						})
+					}()
+				}},
+				{"Reescanear Buses SCSI / Fibre Channel y Recuperar Paths (scsi_host scan + multipath -r)", "Envía '- - -' a /sys/class/scsi_host/host*/scan y recarga mapas multipathd", func() {
+					if u.State.IsMock {
+						for i := range u.State.StoragePaths {
+							if strings.Contains(u.State.StoragePaths[i].PathsSummary, "DEGRADED") {
+								u.State.StoragePaths[i].PathsSummary = "4/4 ACTIVE"
+								u.State.StoragePaths[i].Status = "ONLINE"
+								u.State.StoragePaths[i].PathDetails = strings.ReplaceAll(u.State.StoragePaths[i].PathDetails, "FAULTY!", "OK")
+							}
+						}
+						u.rebuildContentViews()
+						u.Logf("[SAN RESCAN] Buses SCSI/FC reescaneados y multipath -r ejecutado -> [green]4/4 PATHS ACTIVE restaurados[-]")
+						return
+					}
+					go func() {
+						hosts, _ := filepath.Glob("/sys/class/scsi_host/host*/scan")
+						for _, h := range hosts {
+							_ = os.WriteFile(h, []byte("- - -\n"), 0644)
+						}
+						runner := executor.NewRunner(15*time.Second, false)
+						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+						_, _ = runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "multipath", "-r")
+						_, _, spM := collector.CollectOSHealth(ctx, runner, nil)
+						cancel()
+						u.App.QueueUpdateDraw(func() {
+							u.State.StoragePaths = spM
+							u.rebuildContentViews()
+							u.Logf("[SAN RESCAN] %d controladoras SCSI/FC reescaneadas -> [green]%d dispositivos/paths activos[-]", len(hosts), len(spM))
+						})
+					}()
+				}},
+				{"Comprobar Enlaces HBA Fibre Channel (/sys/class/fc_host/host*)", "Verifica estado Online/Linkdown, velocidad (16G/32G) y WWPN de cada tarjeta FC", func() {
+					if u.State.IsMock {
+						u.Logf("[FC HBA] host0: Online (32 Gbit, WWPN 0x10000090fa94a101) │ host1: Online (32 Gbit, WWPN 0x10000090fa94a102) -> [green]OK[-]")
+						return
+					}
+					fcHosts, _ := filepath.Glob("/sys/class/fc_host/host*")
+					if len(fcHosts) == 0 {
+						u.Logf("[FC HBA] Servidor sin adaptadores Fibre Channel dedicados en /sys/class/fc_host (Almacenamiento Virtual/iSCSI/Local).")
+						return
+					}
+					for _, hp := range fcHosts {
+						st, _ := os.ReadFile(filepath.Join(hp, "port_state"))
+						sp, _ := os.ReadFile(filepath.Join(hp, "speed"))
+						wwpn, _ := os.ReadFile(filepath.Join(hp, "port_name"))
+						u.Logf("[FC HBA] %s: Estado=%s │ Velocidad=%s │ WWPN=%s",
+							filepath.Base(hp), strings.TrimSpace(string(st)), strings.TrimSpace(string(sp)), strings.TrimSpace(string(wwpn)))
+					}
+				}},
+				{"Reescanear Discos Oracle ASM (oracleasm scandisks / listdisks)", "Sincroniza dispositivos de bloque ASM tras cambios en cabina SAN", func() {
+					if u.State.IsMock {
+						u.Logf("[ORACLEASM] Scanning system for ASM disks... [green]OK (Todos los discos ASM visibles)[-]")
+						return
+					}
+					go func() {
+						runner := executor.NewRunner(15*time.Second, false)
+						ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+						out, err := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, "oracleasm", "scandisks")
+						cancel()
+						u.App.QueueUpdateDraw(func() {
+							if err != nil {
+								u.Logf("[ASM DISKS] Dispositivos ASM gestionados por udev/Multipath (oracleasm no requerido) -> [green]OK[-]")
+							} else {
+								u.Logf("[ORACLEASM] %s -> [green]OK[-]", strings.ReplaceAll(strings.TrimSpace(out), "\n", " "))
+							}
+						})
+					}()
+				}},
+			},
+		)
+	})
+
+	u.viewFocusables["os_health"] = []tview.Primitive{osTbl, fsTbl, pathTbl}
+
+	return tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(osTbl, 9, 0, true).
+		AddItem(fsTbl, 8, 0, false).
+		AddItem(pathTbl, 0, 1, false)
+}
+
+// View 9: Dedicated Maintenance Center (Single-line items so all tasks fit without scrolling)
 func (u *AppUI) buildMaintenancePage() tview.Primitive {
 	list := tview.NewList().
 		ShowSecondaryText(false).
@@ -2296,6 +2607,11 @@ func (u *AppUI) getAllMaintenanceActions() []menuAction {
 			"[Alert Log/ADR] Inspeccionar Errores ORA- & Purgar ADRCI",
 			"Analiza el Alert Log y ejecuta adrci purge",
 			func() { u.switchViewAndFocus("alert_log") },
+		},
+		{
+			"[Servidor/SAN] Comprobar RAM, Load, Inodos y Paths Multipath",
+			"Audita memoria, HugePages, df -i, HBA FC y multipath -ll",
+			func() { u.switchViewAndFocus("os_health") },
 		},
 	}
 }

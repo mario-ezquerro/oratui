@@ -204,6 +204,37 @@ type AlertLogEntry struct {
 	Message   string
 }
 
+type OSHealthMetric struct {
+	Category       string  // CPU & LOAD, MEMORIA RAM, SWAP, HUGEPAGES, THP, KERNEL AIO, SHM / IPC, LIMITES / NTP
+	Component      string  // Nombre del subsistema comprobado
+	CurrentValue   string  // Valor actual detallado
+	UsedPct        float64 // Porcentaje de uso (o -1 si no aplica barra)
+	Status         string  // ONLINE, OK, WARNING, HIGH, CRITICAL
+	Recommendation string  // Diagnóstico o recomendación DBA
+}
+
+type FilesystemMount struct {
+	MountPoint   string  // /, /u01, /u02, /dev/shm, /tmp, /var
+	Device       string  // /dev/mapper/vg_ora-lv_u01, tmpfs...
+	FSType       string  // xfs, ext4, tmpfs, nfs, acfs
+	TotalMB      int     // Tamaño total en MB
+	UsedMB       int     // Espacio usado en MB
+	AvailMB      int     // Espacio disponible en MB
+	UsedPct      float64 // % uso de bloques
+	InodeUsedPct float64 // % uso de inodos (df -i)
+	Status       string  // ONLINE, WARNING, CRITICAL
+}
+
+type StoragePathInfo struct {
+	Name        string // mpatha / ORA_DATA_01 / fc_host0 / sdb / ASM:DATA01
+	Type        string // MULTIPATH, FC_HBA, ISCSI, BLOCK_DISK, ORACLEASM
+	WWIDOrModel string // WWID 36005... o Modelo de cabina/disco (PURE FlashArray, VMware Virtual)
+	Size        string // 500G, 1.0T, 16 Gbit
+	PathsSummary string // 4/4 ACTIVE, 2/4 DEGRADED, Online, running
+	PathDetails string // sdb(OK), sdc(OK), sdd(OK), sde(OK) │ Scheduler: mq-deadline
+	Status      string // ONLINE, WARNING, OFFLINE, CRITICAL
+}
+
 type EnvironmentState struct {
 	Topology       TopologyMode
 	BorderMode     BorderStyle
@@ -217,22 +248,25 @@ type EnvironmentState struct {
 	IsMock         bool
 	LastUpdated    time.Time
 
-	Nodes          []ClusterNode
-	Instances      []InstanceInfo
-	PDBs           []PDBInfo
-	Services       []RACService
-	Sessions       []UserSession
-	Tablespaces    []TablespaceInfo
-	Datafiles      []DatafileInfo
-	TableSegments  []TableSegment
-	InvalidObjects []InvalidObject
-	Diskgroups     []ASMDiskgroup
-	Listeners      []ListenerInfo
-	RMANBackups    []RMANBackupJob
-	RestorePoints  []RestorePoint
+	Nodes           []ClusterNode
+	Instances       []InstanceInfo
+	PDBs            []PDBInfo
+	Services        []RACService
+	Sessions        []UserSession
+	Tablespaces     []TablespaceInfo
+	Datafiles       []DatafileInfo
+	TableSegments   []TableSegment
+	InvalidObjects  []InvalidObject
+	Diskgroups      []ASMDiskgroup
+	Listeners       []ListenerInfo
+	RMANBackups     []RMANBackupJob
+	RestorePoints   []RestorePoint
 	StandbyDBs      []DataGuardStandby
 	AlertEntries    []AlertLogEntry
 	AlertTailLines  []string
 	DiagTraceDir    string
 	AlertFileSizeMB float64
+	OSMetrics       []OSHealthMetric
+	Filesystems     []FilesystemMount
+	StoragePaths    []StoragePathInfo
 }
