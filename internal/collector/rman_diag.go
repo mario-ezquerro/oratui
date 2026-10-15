@@ -2,8 +2,12 @@ package collector
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mario/ora-tui/internal/discovery"
 	"github.com/mario/ora-tui/internal/executor"
@@ -36,24 +40,11 @@ FROM v$restore_point
 ORDER BY time DESC;
 `
 
-const sqlAlertLogQuery = `
-SELECT * FROM (
-    SELECT
-        TO_CHAR(originating_timestamp, 'YYYY-MM-DD HH24:MI:SS'),
-        NVL(CON_NAME, 'CDB$ROOT'),
-        CASE
-            WHEN message_text LIKE '%ORA-00600%' OR message_text LIKE '%ORA-07445%' OR message_text LIKE '%ORA-0165%' THEN 'CRITICAL'
-            WHEN message_text LIKE '%ORA-%' OR message_text LIKE '%Deadlock%' THEN 'WARNING'
-            ELSE 'INFO'
-        END AS severity,
-        NVL(REGEXP_SUBSTR(message_text, '(ORA-[0-9]+|CRS-[0-9]+)'), 'ALERT'),
-        REPLACE(REPLACE(SUBSTR(message_text, 1, 140), CHR(10), ' '), '|', ' ')
-    FROM v$diag_alert_ext
-    WHERE originating_timestamp > SYSDATE - 3
-      AND (message_text LIKE '%ORA-%' OR message_text LIKE '%CRS-%' OR message_text LIKE '%ALTER SYSTEM%' OR message_text LIKE '%Completed:%')
-    ORDER BY originating_timestamp DESC
-) WHERE ROWNUM <= 50;
+const sqlDiagTraceDirQuery = `
+SELECT value FROM v$diag_info WHERE name = 'Diag Trace';
 `
+
+var oraCodeRegex = regexp.MustCompile(`(ORA-\d+|CRS-\d+|TNS-\d+)`)
 
 func ParseRMANBackupRows(rows [][]string) []model.RMANBackupJob {
 	var list []model.RMANBackupJob
@@ -111,6 +102,70 @@ func ParseAlertLogRows(rows [][]string) []model.AlertLogEntry {
 	return list
 }
 
+// ReadTailAlertLogFile reads the last ~64KB of alert_<SID>.log for instantaneous, non-blocking ORA- analysis.
+func ReadTailAlertLogFile(traceDir, dbSID string) []model.AlertLogEntry {
+	alertFile := filepath.Join(traceDir, "alert_"+dbSID+".log")
+	f, err := os.Open(alertFile)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return nil
+	}
+	size := stat.Size()
+	const maxTail = 65536
+	offset := int64(0)
+	if size > maxTail {
+		offset = size - maxTail
+	}
+	buf := make([]byte, size-offset)
+	_, err = f.ReadAt(buf, offset)
+	if err != nil {
+		return nil
+	}
+
+	var entries []model.AlertLogEntry
+	lastTS := time.Now().Format("2006-01-02 15:04:05")
+	lines := strings.Split(string(buf), "\n")
+	for i := len(lines) - 1; i >= 0 && len(entries) < 40; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		// Check for ISO timestamp line like 2026-10-15T08:12:01.123456+02:00
+		if len(line) >= 19 && line[4] == '-' && line[7] == '-' && (line[10] == 'T' || line[10] == ' ') {
+			lastTS = strings.ReplaceAll(line[:19], "T", " ")
+			continue
+		}
+		if m := oraCodeRegex.FindStringSubmatch(line); len(m) >= 2 {
+			code := m[1]
+			sev := "WARNING"
+			if strings.HasPrefix(code, "ORA-00600") || strings.HasPrefix(code, "ORA-07445") || strings.HasPrefix(code, "ORA-0165") || strings.HasPrefix(code, "ORA-04031") {
+				sev = "CRITICAL"
+			}
+			entries = append(entries, model.AlertLogEntry{
+				Timestamp: lastTS,
+				Instance:  dbSID,
+				Severity:  sev,
+				ErrorCode: code,
+				Message:   line,
+			})
+		} else if strings.Contains(line, "ALTER SYSTEM") || strings.Contains(line, "Completed:") || strings.Contains(line, "Starting ORACLE instance") {
+			entries = append(entries, model.AlertLogEntry{
+				Timestamp: lastTS,
+				Instance:  dbSID,
+				Severity:  "INFO",
+				ErrorCode: "ALERT-LOG",
+				Message:   line,
+			})
+		}
+	}
+	return entries
+}
+
 // CollectRMANDiag queries RMAN backup jobs, Flashback restore points, and Alert Log ORA- entries.
 func CollectRMANDiag(
 	ctx context.Context,
@@ -123,7 +178,12 @@ func CollectRMANDiag(
 	}
 	bkpRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlRMANBackupsQuery, nil)
 	rpRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlRestorePointsQuery, nil)
-	alertRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlAlertLogQuery, nil)
 
-	return ParseRMANBackupRows(bkpRows), ParseRestorePointRows(rpRows), ParseAlertLogRows(alertRows)
+	var alertEntries []model.AlertLogEntry
+	if traceRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlDiagTraceDirQuery, nil); err == nil && len(traceRows) > 0 && len(traceRows[0]) > 0 {
+		traceDir := strings.TrimSpace(traceRows[0][0])
+		alertEntries = ReadTailAlertLogFile(traceDir, dbSID)
+	}
+
+	return ParseRMANBackupRows(bkpRows), ParseRestorePointRows(rpRows), alertEntries
 }

@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mario/ora-tui/internal/discovery"
@@ -30,12 +31,17 @@ func CollectLiveEnvironment(ctx context.Context, runner *executor.Runner) (*mode
 
 	nodes, crsResources := CollectCluster(ctx, runner, env)
 
-	// Pick active DB SID
+	// Pick active DB SID (skipping +ASM and -MGMTDB entries)
 	activeSID := ""
 	if len(env.RunningSIDs) > 0 {
 		activeSID = env.RunningSIDs[0]
-	} else if len(env.Oratab) > 0 {
-		activeSID = env.Oratab[0].SID
+	} else {
+		for _, entry := range env.Oratab {
+			if !strings.HasPrefix(entry.SID, "+ASM") && !strings.HasPrefix(entry.SID, "-MGMT") {
+				activeSID = entry.SID
+				break
+			}
+		}
 	}
 
 	instances, pdbs, services, standbys := CollectDatabase(ctx, runner, env, activeSID)

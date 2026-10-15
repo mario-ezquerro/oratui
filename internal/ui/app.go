@@ -11,15 +11,16 @@ import (
 )
 
 type AppUI struct {
-	App        *tview.Application
-	Pages      *tview.Pages
-	State      *model.EnvironmentState
-	Header     *tview.TextView
-	NavList    *tview.List
-	Content    *tview.Pages
-	LogView    *tview.TextView
-	Footer     *tview.TextView
-	ActiveView string
+	App            *tview.Application
+	Pages          *tview.Pages
+	State          *model.EnvironmentState
+	Header         *tview.TextView
+	NavList        *tview.List
+	Content        *tview.Pages
+	LogView        *tview.TextView
+	Footer         *tview.TextView
+	ActiveView     string
+	viewFocusables map[string][]tview.Primitive
 }
 
 func NewAppUI(state *model.EnvironmentState) *AppUI {
@@ -29,10 +30,11 @@ func NewAppUI(state *model.EnvironmentState) *AppUI {
 	ApplyBorderTheme(state.BorderMode)
 
 	ui := &AppUI{
-		App:        tview.NewApplication(),
-		Pages:      tview.NewPages(),
-		State:      state,
-		ActiveView: "overview",
+		App:            tview.NewApplication(),
+		Pages:          tview.NewPages(),
+		State:          state,
+		ActiveView:     "overview",
+		viewFocusables: make(map[string][]tview.Primitive),
 	}
 
 	ui.buildLayout()
@@ -44,6 +46,18 @@ func (u *AppUI) Logf(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	fmt.Fprintf(u.LogView, "[aqua][%s][-] %s\n", ts, msg)
 	u.LogView.ScrollToEnd()
+}
+
+// ensureSelectableRow guarantees that a tview.Table with SetSelectable(true, false)
+// always has at least 1 selectable data row (row 1) so tview never traps focus on an empty table.
+func ensureSelectableRow(tbl *tview.Table, colCount int, emptyMsg string) {
+	if tbl.GetRowCount() <= 1 {
+		tbl.SetCell(1, 0, tview.NewTableCell("[gray]"+emptyMsg+"[-]").SetSelectable(true))
+		for c := 1; c < colCount; c++ {
+			tbl.SetCell(1, c, tview.NewTableCell("[gray]-[-]").SetSelectable(true))
+		}
+	}
+	tbl.Select(1, 0)
 }
 
 func (u *AppUI) buildLayout() {
@@ -60,20 +74,40 @@ func (u *AppUI) buildLayout() {
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(tcell.ColorNavy).
 		SetSelectedTextColor(tcell.ColorWhite)
-	u.NavList.SetBorder(true).SetTitle(" MENU [Flechas/Enter] ")
+	u.NavList.SetBorder(true).SetTitle(" MENU [↑↓ / → Ventana] ")
+
+	viewKeys := []string{
+		"overview",
+		"sessions",
+		"tablespaces",
+		"tables",
+		"asm_net",
+		"rman_dg",
+		"alert_log",
+		"maintenance",
+	}
 
 	u.NavList.
-		AddItem("1. Cluster & DB Estado", "   Nodos, Instancias, PDBs", '1', func() { u.switchView("overview") }).
-		AddItem("2. Usuarios Conectados", "   Sesiones, Locks, SQL_ID", '2', func() { u.switchView("sessions") }).
-		AddItem("3. Tablespaces & Files", "   Uso %, Datafiles, Temp", '3', func() { u.switchView("tablespaces") }).
-		AddItem("4. Tablas & Objetos", "   Segmentos, Stats, Invalid", '4', func() { u.switchView("tables") }).
-		AddItem("5. ASM & Red Listeners", "   Diskgroups, SCAN, Local", '5', func() { u.switchView("asm_net") }).
-		AddItem("6. RMAN, Flashback & DG", "   Backups, GRP, Data Guard", '6', func() { u.switchView("rman_dg") }).
-		AddItem("7. Alert Log & Errores", "   Visor ORA-, ADRCI Purge", '7', func() { u.switchView("alert_log") }).
-		AddItem("8. Centro Mantenimiento", "   Asistentes DBA Guiados", '8', func() { u.switchView("maintenance") }).
+		AddItem("1. Cluster & DB Estado", "   Nodos, Instancias, PDBs", '1', func() { u.switchViewAndFocus("overview") }).
+		AddItem("2. Usuarios Conectados", "   Sesiones, Locks, SQL_ID", '2', func() { u.switchViewAndFocus("sessions") }).
+		AddItem("3. Tablespaces & Files", "   Uso %, Datafiles, Temp", '3', func() { u.switchViewAndFocus("tablespaces") }).
+		AddItem("4. Tablas & Objetos", "   Segmentos, Stats, Invalid", '4', func() { u.switchViewAndFocus("tables") }).
+		AddItem("5. ASM & Red Listeners", "   Diskgroups, SCAN, Local", '5', func() { u.switchViewAndFocus("asm_net") }).
+		AddItem("6. RMAN, Flashback & DG", "   Backups, GRP, Data Guard", '6', func() { u.switchViewAndFocus("rman_dg") }).
+		AddItem("7. Alert Log & Errores", "   Visor ORA-, ADRCI Purge", '7', func() { u.switchViewAndFocus("alert_log") }).
+		AddItem("8. Centro Mantenimiento", "   Asistentes DBA Guiados", '8', func() { u.switchViewAndFocus("maintenance") }).
 		AddItem("b. Cambiar Marcos/Bordes", "   Simple ┌─┐ / Doble ╔═╗", 'b', func() { u.cycleBorderMode() }).
 		AddItem("t. Cambiar Topologia", "   Alternar RAC / Single", 't', func() { u.toggleTopology() }).
-		AddItem("q. Salir (Quit)", "   Cerrar herramienta", 'q', func() { u.App.Stop() })
+		AddItem("q. Salir (Ctrl+C / q)", "   Cerrar herramienta", 'q', func() { u.App.Stop() })
+
+	// Preview view automatically when moving Up/Down in the left menu
+	u.NavList.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if index >= 0 && index < len(viewKeys) {
+			viewName := viewKeys[index]
+			u.ActiveView = viewName
+			u.Content.SwitchToPage(viewName)
+		}
+	})
 
 	// 3. Content Workspace Pages
 	u.Content = tview.NewPages()
@@ -91,7 +125,7 @@ func (u *AppUI) buildLayout() {
 	u.Footer = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
-		SetText("[yellow][Flechas ↑↓←→][-] Navegar │ [yellow][Enter][-] Ventana Acciones │ [yellow][Tab][-] Cambiar Panel │ [yellow][m][-] Mantenimiento │ [yellow][b][-] Marcos ┌─┐/╔═╗ │ [yellow][q][-] Salir")
+		SetText("[yellow][←/→][-] Cambiar Ventana │ [yellow][↑/↓][-] Mover Fila │ [yellow][Enter][-] Acciones │ [yellow][m][-] Mantenimiento │ [yellow][b][-] Marcos ┌─┐/╔═╗ │ [yellow][Ctrl+C / q][-] Salir")
 
 	// Populate initial views
 	u.rebuildContentViews()
@@ -111,23 +145,30 @@ func (u *AppUI) buildLayout() {
 	u.Pages.AddPage("main", mainFlex, true, true)
 	u.App.SetRoot(u.Pages, true)
 
-	// Global keyboard navigation
+	// Global keyboard navigation (including Left/Right arrows between windows and Ctrl+C exit)
 	u.App.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Always allow Ctrl+C to immediately exit the program
+		if event.Key() == tcell.KeyCtrlC {
+			u.App.Stop()
+			return nil
+		}
+
+		// If a modal is open, let modal handle Esc/Enter/Arrows
 		if u.Pages.HasPage("modal") {
-			if event.Key() == tcell.KeyEscape {
+			if event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyLeft {
 				u.Pages.RemovePage("modal")
+				u.focusFirstRightWindow()
 				return nil
 			}
 			return event
 		}
 
 		switch event.Key() {
-		case tcell.KeyTab:
-			if u.App.GetFocus() == u.NavList {
-				u.focusActiveContent()
-			} else {
-				u.App.SetFocus(u.NavList)
-			}
+		case tcell.KeyRight, tcell.KeyTab:
+			u.moveWindowFocus(1)
+			return nil
+		case tcell.KeyLeft, tcell.KeyBacktab:
+			u.moveWindowFocus(-1)
 			return nil
 		case tcell.KeyEscape:
 			u.App.SetFocus(u.NavList)
@@ -149,7 +190,55 @@ func (u *AppUI) buildLayout() {
 	})
 
 	u.Logf("Auto-Discovery completado: Modo=%s │ Host=%s │ Version=%s", u.State.Topology, u.State.HostName, u.State.ReleaseVersion)
-	u.Logf("Marcos configurados en: [yellow]%s[-] (Pulse [yellow]b[-] para alternar entre Simple ┌─┐ y Doble ╔═╗).", u.State.BorderMode)
+	u.Logf("Navegacion: Use [yellow]← / →[-] para saltar entre ventanas, [yellow]↑ / ↓[-] para desplazarse, [yellow]Enter[-] para acciones y [yellow]Ctrl+C[-] para salir.")
+}
+
+// moveWindowFocus moves focus forward (+1, Right Arrow / Tab) or backward (-1, Left Arrow / Shift+Tab)
+// across the Left Menu (NavList) and all sub-windows of the currently active view.
+func (u *AppUI) moveWindowFocus(delta int) {
+	chain := append([]tview.Primitive{u.NavList}, u.viewFocusables[u.ActiveView]...)
+	if len(chain) <= 1 {
+		u.App.SetFocus(u.NavList)
+		return
+	}
+
+	curr := u.App.GetFocus()
+	currIdx := 0
+	for i, p := range chain {
+		if p == curr {
+			currIdx = i
+			break
+		}
+	}
+
+	nextIdx := currIdx + delta
+	if nextIdx >= len(chain) {
+		nextIdx = 0
+	} else if nextIdx < 0 {
+		nextIdx = len(chain) - 1
+	}
+	u.App.SetFocus(chain[nextIdx])
+}
+
+func (u *AppUI) focusFirstRightWindow() {
+	subs := u.viewFocusables[u.ActiveView]
+	if len(subs) > 0 {
+		u.App.SetFocus(subs[0])
+	} else {
+		u.App.SetFocus(u.NavList)
+	}
+}
+
+func (u *AppUI) switchViewAndFocus(name string) {
+	u.ActiveView = name
+	u.Content.SwitchToPage(name)
+	u.focusFirstRightWindow()
+}
+
+func (u *AppUI) RefreshAll() {
+	u.refreshHeader()
+	u.rebuildContentViews()
+	u.Content.SwitchToPage(u.ActiveView)
 }
 
 func (u *AppUI) cycleBorderMode() {
@@ -193,19 +282,6 @@ func (u *AppUI) refreshHeader() {
 	u.Header.SetText(text)
 }
 
-func (u *AppUI) switchView(name string) {
-	u.ActiveView = name
-	u.Content.SwitchToPage(name)
-	u.focusActiveContent()
-}
-
-func (u *AppUI) focusActiveContent() {
-	_, item := u.Content.GetFrontPage()
-	if item != nil {
-		u.App.SetFocus(item)
-	}
-}
-
 func (u *AppUI) toggleTopology() {
 	if u.State.Topology == model.ModeRAC {
 		u.State.Topology = model.ModeSingle
@@ -234,7 +310,7 @@ func (u *AppUI) rebuildContentViews() {
 // View 1: Cluster, Nodes, Instances & PDBs
 func (u *AppUI) buildOverviewPage() tview.Primitive {
 	nodesTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	nodesTbl.SetBorder(true).SetTitle(" NODOS DEL CLUSTER & DAEMONS [Enter = Acciones de Nodo] ")
+	nodesTbl.SetBorder(true).SetTitle(" [Ventana 1/3] NODOS DEL CLUSTER & DAEMONS (←/→ Cambiar Ventana │ Enter = Acciones) ")
 	headers := []string{"NODO", "ESTADO", "ROL", "CRS", "CSSD", "EVMD", "ASM", "VIP", "INTERCONNECT"}
 	for c, h := range headers {
 		nodesTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -251,6 +327,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 		nodesTbl.SetCell(r, 7, tview.NewTableCell(ColorStatus(n.VIP)))
 		nodesTbl.SetCell(r, 8, tview.NewTableCell(n.Interconnect))
 	}
+	ensureSelectableRow(nodesTbl, len(headers), "Sin nodos de cluster detectados")
 	nodesTbl.SetSelectedFunc(func(row, col int) {
 		if row <= 0 || row > len(u.State.Nodes) {
 			return
@@ -300,7 +377,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 	})
 
 	instTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	instTbl.SetBorder(true).SetTitle(" INSTANCIAS DE BASE DE DATOS & DATA GUARD [Enter = Start/Stop/Logs] ")
+	instTbl.SetBorder(true).SetTitle(" [Ventana 2/3] INSTANCIAS DE BASE DE DATOS & DATA GUARD (←/→ Ventana │ Enter = Start/Stop) ")
 	iHeaders := []string{"INST", "DB_NAME", "NODO", "ESTADO", "OPEN_MODE", "FLASHBACK", "SGA/PGA", "FRA_USO", "DG_LAG", "UPTIME"}
 	for c, h := range iHeaders {
 		instTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -318,6 +395,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 		instTbl.SetCell(r, 8, tview.NewTableCell("[green]"+inst.DGLag+"[-]"))
 		instTbl.SetCell(r, 9, tview.NewTableCell(inst.Uptime))
 	}
+	ensureSelectableRow(instTbl, len(iHeaders), "Sin instancias activas detectadas (Pulse Enter para iniciar)")
 	instTbl.SetSelectedFunc(func(row, col int) {
 		if row <= 0 || row > len(u.State.Instances) {
 			return
@@ -327,7 +405,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 	})
 
 	pdbTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	pdbTbl.SetBorder(true).SetTitle(" PLUGGABLE DATABASES - PDBs [Enter = Abrir/Cerrar PDB] ")
+	pdbTbl.SetBorder(true).SetTitle(" [Ventana 3/3] PLUGGABLE DATABASES - PDBs (←/→ Ventana │ Enter = Abrir/Cerrar PDB) ")
 	pHeaders := []string{"CON_ID", "PDB_NAME", "OPEN_MODE", "RESTRICTED", "TAMANO_GB", "INSTANCIAS"}
 	for c, h := range pHeaders {
 		pdbTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -341,6 +419,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 		pdbTbl.SetCell(r, 4, tview.NewTableCell(fmt.Sprintf("%.1f GB", p.SizeGB)))
 		pdbTbl.SetCell(r, 5, tview.NewTableCell(p.InstName))
 	}
+	ensureSelectableRow(pdbTbl, len(pHeaders), "Arquitectura Non-CDB o sin PDBs registradas")
 	pdbTbl.SetSelectedFunc(func(row, col int) {
 		if row <= 0 || row > len(u.State.PDBs) {
 			return
@@ -363,6 +442,8 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 		)
 	})
 
+	u.viewFocusables["overview"] = []tview.Primitive{nodesTbl, instTbl, pdbTbl}
+
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(nodesTbl, 7, 0, true).
 		AddItem(instTbl, 7, 0, false).
@@ -372,7 +453,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 // View 2: Connected Users & Sessions
 func (u *AppUI) buildSessionsPage() tview.Primitive {
 	tbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	tbl.SetBorder(true).SetTitle(" USUARIOS CONECTADOS & SESIONES ACTIVAS (gv$session) [Enter = Menu Sesion] ")
+	tbl.SetBorder(true).SetTitle(" USUARIOS CONECTADOS & SESIONES (gv$session) (← Volver al Menu │ Enter = Menu Sesion) ")
 
 	headers := []string{"INST", "SID,SER#", "USUARIO", "ESTADO", "MAQUINA", "PROGRAMA", "SQL_ID", "EVENTO DE ESPERA", "TIEMPO", "BLOQUEO", "PGA_MB"}
 	for c, h := range headers {
@@ -393,6 +474,7 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 		tbl.SetCell(r, 9, tview.NewTableCell(ColorStatus(s.BlockingSession)))
 		tbl.SetCell(r, 10, tview.NewTableCell(fmt.Sprintf("%.1fM", s.PGAMB)))
 	}
+	ensureSelectableRow(tbl, len(headers), "Sin sesiones de usuario activas")
 
 	sqlPreview := tview.NewTextView().SetDynamicColors(true)
 	sqlPreview.SetBorder(true).SetTitle(" DETALLE SQL ACTUAL & DIAGNOSTICO DE BLOQUEO ")
@@ -400,6 +482,8 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 		s0 := u.State.Sessions[0]
 		sqlPreview.SetText(fmt.Sprintf(" [yellow]Usuario:[-] %s (SID %d,%d @ Inst %d) │ [yellow]Espera:[-] %s\n [yellow]SQL Text:[-] [white]%s[-]",
 			s0.Username, s0.SID, s0.Serial, s0.InstID, s0.WaitEvent, s0.SQLText))
+	} else {
+		sqlPreview.SetText(" [gray]Seleccione una sesion para inspeccionar su sentencia SQL y estado de bloqueo.[-]")
 	}
 
 	tbl.SetSelectionChangedFunc(func(row, col int) {
@@ -443,6 +527,8 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 		)
 	})
 
+	u.viewFocusables["sessions"] = []tview.Primitive{tbl, sqlPreview}
+
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tbl, 0, 1, true).
 		AddItem(sqlPreview, 5, 0, false)
@@ -451,7 +537,7 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 // View 3: Tablespaces & Datafiles
 func (u *AppUI) buildTablespacesPage() tview.Primitive {
 	tbsTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	tbsTbl.SetBorder(true).SetTitle(" ESTADO DE TABLESPACES (dba_tablespaces) [Enter = Ampliar / Mantenimiento] ")
+	tbsTbl.SetBorder(true).SetTitle(" [Ventana 1/2] ESTADO DE TABLESPACES (←/→ Cambiar Ventana │ Enter = Mantenimiento) ")
 
 	headers := []string{"TABLESPACE", "TIPO", "ESTADO", "TOTAL_MB", "USADO_MB", "LIBRE_MB", "USO % (BARRA)", "AUTOEXTEND", "DATAFILES"}
 	for c, h := range headers {
@@ -470,12 +556,13 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 		tbsTbl.SetCell(r, 7, tview.NewTableCell(ts.AutoExtend))
 		tbsTbl.SetCell(r, 8, tview.NewTableCell(fmt.Sprintf("%d", ts.Datafiles)))
 	}
+	ensureSelectableRow(tbsTbl, len(headers), "Sin tablespaces detectados")
 
-	dfTbl := tview.NewTable().SetBorders(false).SetSelectable(false, false)
-	dfTbl.SetBorder(true).SetTitle(" DATAFILES ASOCIADOS (dba_data_files) ")
+	dfTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	dfTbl.SetBorder(true).SetTitle(" [Ventana 2/2] DATAFILES ASOCIADOS (dba_data_files) (←/→ Cambiar Ventana) ")
 	dHeaders := []string{"FILE_ID", "TABLESPACE", "RUTA / ASM FILE", "TAMANO_MB", "MAX_MB", "AUTOEXTEND", "ESTADO"}
 	for c, h := range dHeaders {
-		dfTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h))
+		dfTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
 	}
 	for i, df := range u.State.Datafiles {
 		r := i + 1
@@ -487,6 +574,7 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 		dfTbl.SetCell(r, 5, tview.NewTableCell(df.AutoExtend))
 		dfTbl.SetCell(r, 6, tview.NewTableCell(ColorStatus(df.Status)))
 	}
+	ensureSelectableRow(dfTbl, len(dHeaders), "Sin datafiles detectados")
 
 	tbsTbl.SetSelectedFunc(func(row, col int) {
 		if row <= 0 || row > len(u.State.Tablespaces) {
@@ -524,6 +612,8 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 		)
 	})
 
+	u.viewFocusables["tablespaces"] = []tview.Primitive{tbsTbl, dfTbl}
+
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tbsTbl, 0, 2, true).
 		AddItem(dfTbl, 8, 0, false)
@@ -532,7 +622,7 @@ func (u *AppUI) buildTablespacesPage() tview.Primitive {
 // View 4: Tables, Segments & Invalid Objects
 func (u *AppUI) buildTablesPage() tview.Primitive {
 	segTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	segTbl.SetBorder(true).SetTitle(" TABLAS & SEGMENTOS PRINCIPALES (dba_tables / dba_segments) [Enter = Mantenimiento] ")
+	segTbl.SetBorder(true).SetTitle(" [Ventana 1/2] TABLAS & SEGMENTOS PRINCIPALES (←/→ Ventana │ Enter = Mantenimiento) ")
 
 	headers := []string{"ESQUEMA", "NOMBRE SEGMENTO", "TIPO", "TABLESPACE", "TAMANO_MB", "NUM_FILAS", "ULT_ANALISIS", "ESTADISTICAS", "FRAGMENTACION"}
 	for c, h := range headers {
@@ -551,12 +641,13 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 		segTbl.SetCell(r, 7, tview.NewTableCell(ColorStatus(seg.StatsStatus)))
 		segTbl.SetCell(r, 8, tview.NewTableCell(ColorStatus(seg.Fragmented)))
 	}
+	ensureSelectableRow(segTbl, len(headers), "Sin segmentos de usuario detectados")
 
-	invTbl := tview.NewTable().SetBorders(false).SetSelectable(false, false)
-	invTbl.SetBorder(true).SetTitle(" OBJETOS INVALIDOS (dba_objects WHERE status='INVALID') ")
+	invTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	invTbl.SetBorder(true).SetTitle(" [Ventana 2/2] OBJETOS INVALIDOS (dba_objects) (←/→ Ventana │ Enter = Recompilar) ")
 	iHeaders := []string{"ESQUEMA", "OBJETO", "TIPO", "ESTADO", "ULTIMO_DDL"}
 	for c, h := range iHeaders {
-		invTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h))
+		invTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
 	}
 	for i, inv := range u.State.InvalidObjects {
 		r := i + 1
@@ -566,6 +657,21 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 		invTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(inv.Status)))
 		invTbl.SetCell(r, 4, tview.NewTableCell(inv.LastDDL))
 	}
+	ensureSelectableRow(invTbl, len(iHeaders), "0 Objetos Invalidos (Todos los objetos estan VALID)")
+
+	invTbl.SetSelectedFunc(func(row, col int) {
+		u.showActionMenuModal(
+			" ══ RECOMPILACION DE OBJETOS INVALIDOS ══ ",
+			[]menuAction{
+				{"Recompilar Todos los Objetos Invalidos (UTL_RECOMP)", "EXEC UTL_RECOMP.RECOMP_PARALLEL(4)", func() {
+					u.State.InvalidObjects = nil
+					u.refreshHeader()
+					u.rebuildContentViews()
+					u.Logf("[SQL] EXEC UTL_RECOMP.RECOMP_PARALLEL(4); -> [green]0 Objetos Invalidos[-]")
+				}},
+			},
+		)
+	})
 
 	segTbl.SetSelectedFunc(func(row, col int) {
 		if row <= 0 || row > len(u.State.TableSegments) {
@@ -616,6 +722,8 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 		)
 	})
 
+	u.viewFocusables["tables"] = []tview.Primitive{segTbl, invTbl}
+
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(segTbl, 0, 2, true).
 		AddItem(invTbl, 7, 0, false)
@@ -624,7 +732,7 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 // View 5: ASM Storage & Listeners
 func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	asmTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	asmTbl.SetBorder(true).SetTitle(" ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup) ")
+	asmTbl.SetBorder(true).SetTitle(" [Ventana 1/2] ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup) (←/→ Cambiar Ventana) ")
 	aHeaders := []string{"DISKGROUP", "ESTADO", "REDUNDANCIA", "TOTAL_MB", "LIBRE_MB", "USABLE_MB", "USO % (BARRA)", "DISCOS_OFFLINE"}
 	for c, h := range aHeaders {
 		asmTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -644,9 +752,10 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 		}
 		asmTbl.SetCell(r, 7, tview.NewTableCell(off))
 	}
+	ensureSelectableRow(asmTbl, len(aHeaders), "Sin Diskgroups ASM (Almacenamiento en Filesystem)")
 
 	lsnrTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	lsnrTbl.SetBorder(true).SetTitle(" RED ORACLE: LISTENERS LOCALES & SCAN [Enter = Start/Stop/Reload] ")
+	lsnrTbl.SetBorder(true).SetTitle(" [Ventana 2/2] RED ORACLE: LISTENERS LOCALES & SCAN (←/→ Ventana │ Enter = Start/Stop/Reload) ")
 	lHeaders := []string{"LISTENER", "TIPO", "NODO", "ESTADO", "ENDPOINT", "SERVICIOS_REG"}
 	for c, h := range lHeaders {
 		lsnrTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -660,6 +769,7 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 		lsnrTbl.SetCell(r, 4, tview.NewTableCell(l.Endpoint))
 		lsnrTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%d", l.Services)))
 	}
+	ensureSelectableRow(lsnrTbl, len(lHeaders), "Sin listeners activos detectados")
 	lsnrTbl.SetSelectedFunc(func(row, col int) {
 		if row <= 0 || row > len(u.State.Listeners) {
 			return
@@ -685,15 +795,17 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 		)
 	})
 
+	u.viewFocusables["asm_net"] = []tview.Primitive{asmTbl, lsnrTbl}
+
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(asmTbl, 8, 0, false).
-		AddItem(lsnrTbl, 0, 1, true)
+		AddItem(asmTbl, 8, 0, true).
+		AddItem(lsnrTbl, 0, 1, false)
 }
 
 // View 6: RMAN Backups, Flashback Restore Points & Data Guard
 func (u *AppUI) buildRMANDGPage() tview.Primitive {
 	rmanTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	rmanTbl.SetBorder(true).SetTitle(" HISTORIAL DE BACKUPS RMAN (v$rman_backup_job_details) [Enter = Lanzar Backup / Crosscheck] ")
+	rmanTbl.SetBorder(true).SetTitle(" [Ventana 1/3] HISTORIAL DE BACKUPS RMAN (←/→ Ventana │ Enter = Lanzar Backup) ")
 	rHeaders := []string{"SESSION_KEY", "TIPO BACKUP", "ESTADO", "INICIO", "DURACION", "TAMANO_GB", "DISPOSITIVO"}
 	for c, h := range rHeaders {
 		rmanTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -708,6 +820,7 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 		rmanTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%.1f GB", b.SizeGB)))
 		rmanTbl.SetCell(r, 6, tview.NewTableCell(b.DeviceType))
 	}
+	ensureSelectableRow(rmanTbl, len(rHeaders), "Sin backups RMAN recientes (Pulse Enter para iniciar backup)")
 	rmanTbl.SetSelectedFunc(func(row, col int) {
 		u.showActionMenuModal(
 			" ══ OPERACIONES DE BACKUP RMAN & FLASHBACK ══ ",
@@ -751,11 +864,11 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 		)
 	})
 
-	rpTbl := tview.NewTable().SetBorders(false).SetSelectable(false, false)
-	rpTbl.SetBorder(true).SetTitle(" FLASHBACK & PUNTOS DE RESTAURACION GARANTIZADOS (v$restore_point) ")
+	rpTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	rpTbl.SetBorder(true).SetTitle(" [Ventana 2/3] FLASHBACK & PUNTOS DE RESTAURACION (v$restore_point) (←/→ Ventana) ")
 	rpHeaders := []string{"NOMBRE RESTORE POINT", "SCN", "FECHA CREACION", "GARANTIZADO", "USO EN FRA"}
 	for c, h := range rpHeaders {
-		rpTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h))
+		rpTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
 	}
 	for i, rp := range u.State.RestorePoints {
 		r := i + 1
@@ -765,12 +878,13 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 		rpTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(rp.Guaranteed)))
 		rpTbl.SetCell(r, 4, tview.NewTableCell(rp.StorageSize))
 	}
+	ensureSelectableRow(rpTbl, len(rpHeaders), "Sin puntos de restauracion activos")
 
-	dgTbl := tview.NewTable().SetBorders(false).SetSelectable(false, false)
-	dgTbl.SetBorder(true).SetTitle(" DATA GUARD STANDBY & REPLICACION (v$dataguard_stats / dgmgrl) ")
+	dgTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	dgTbl.SetBorder(true).SetTitle(" [Ventana 3/3] DATA GUARD STANDBY & REPLICACION (v$dataguard_stats) (←/→ Ventana) ")
 	dgHeaders := []string{"STANDBY DB", "ROL", "HOST DESTINO", "OPEN_MODE", "TRANSPORT_LAG", "APPLY_LAG", "ESTADO MRP0", "SWITCHOVER"}
 	for c, h := range dgHeaders {
-		dgTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h))
+		dgTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
 	}
 	for i, dg := range u.State.StandbyDBs {
 		r := i + 1
@@ -783,6 +897,9 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 		dgTbl.SetCell(r, 6, tview.NewTableCell(ColorStatus(dg.MRPStatus)))
 		dgTbl.SetCell(r, 7, tview.NewTableCell(ColorStatus(dg.Switchover)))
 	}
+	ensureSelectableRow(dgTbl, len(dgHeaders), "Sin standby Data Guard configurada")
+
+	u.viewFocusables["rman_dg"] = []tview.Primitive{rmanTbl, rpTbl, dgTbl}
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(rmanTbl, 0, 2, true).
@@ -793,7 +910,7 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 // View 7: Alert Log & ORA- Errors
 func (u *AppUI) buildAlertLogPage() tview.Primitive {
 	alertTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	alertTbl.SetBorder(true).SetTitle(" VISOR DE ALERT LOG & ERRORES ORA- (v$diag_alert_ext) [Enter = Accion Correctiva / Purgar ADRCI] ")
+	alertTbl.SetBorder(true).SetTitle(" VISOR DE ALERT LOG & ERRORES ORA- (← Volver al Menu │ Enter = Accion Correctiva / ADRCI) ")
 	headers := []string{"TIMESTAMP", "INSTANCIA", "SEVERIDAD", "CODIGO", "MENSAJE / DIAGNOSTICO"}
 	for c, h := range headers {
 		alertTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -806,20 +923,24 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 		alertTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(a.ErrorCode)))
 		alertTbl.SetCell(r, 4, tview.NewTableCell(a.Message))
 	}
+	ensureSelectableRow(alertTbl, len(headers), "Sin errores ORA- recientes en el Alert Log (Pulse Enter para mantenimiento ADRCI)")
 
 	alertTbl.SetSelectedFunc(func(row, col int) {
-		if row <= 0 || row > len(u.State.AlertEntries) {
-			return
+		errCode := "ADRCI"
+		instName := u.State.HostName
+		if row > 0 && row <= len(u.State.AlertEntries) {
+			entry := u.State.AlertEntries[row-1]
+			errCode = entry.ErrorCode
+			instName = entry.Instance
 		}
-		entry := u.State.AlertEntries[row-1]
 		u.showActionMenuModal(
-			fmt.Sprintf(" ══ RESPUESTA A ALERTA: %s (%s) ══ ", entry.ErrorCode, entry.Instance),
+			fmt.Sprintf(" ══ RESPUESTA A ALERTA / ADRCI: %s (%s) ══ ", errCode, instName),
 			[]menuAction{
-				{"Ir a Resolucion Guiada (Tablespaces / Bloqueos)", "Abre el modulo asociado al error " + entry.ErrorCode, func() {
-					if strings.Contains(entry.ErrorCode, "01654") {
-						u.switchView("tablespaces")
+				{"Ir a Resolucion Guiada (Tablespaces / Bloqueos)", "Abre el modulo asociado al error " + errCode, func() {
+					if strings.Contains(errCode, "0165") {
+						u.switchViewAndFocus("tablespaces")
 					} else {
-						u.switchView("sessions")
+						u.switchViewAndFocus("sessions")
 					}
 				}},
 				{"Purgar Trazas Antiguas con ADRCI (> 7 dias)", "adrci exec='purge -age 10080 -type TRACE'", func() {
@@ -828,6 +949,8 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 			},
 		)
 	})
+
+	u.viewFocusables["alert_log"] = []tview.Primitive{alertTbl}
 
 	return alertTbl
 }
@@ -838,13 +961,16 @@ func (u *AppUI) buildMaintenancePage() tview.Primitive {
 		ShowSecondaryText(true).
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(tcell.ColorNavy)
-	list.SetBorder(true).SetTitle(" ══ CENTRO DE TAREAS DE MANTENIMIENTO GUIADO [Flechas ↑↓ + Enter] ══ ")
+	list.SetBorder(true).SetTitle(" ══ CENTRO DE TAREAS DE MANTENIMIENTO GUIADO (← Volver al Menu │ ↑↓ + Enter) ══ ")
 
 	actions := u.getAllMaintenanceActions()
 	for idx, act := range actions {
 		shortcut := rune('a' + idx)
 		list.AddItem(act.title, "   "+act.subtitle, shortcut, act.handler)
 	}
+
+	u.viewFocusables["maintenance"] = []tview.Primitive{list}
+
 	return list
 }
 
@@ -885,12 +1011,12 @@ func (u *AppUI) getAllMaintenanceActions() []menuAction {
 		{
 			"[Tablespaces] Ampliar Tablespace Critico (>90%) / Anadir Datafile",
 			"Detecta tablespaces al limite (ERP_DATA_TBS 93%) y agrega datafile en +DATA",
-			func() { u.switchView("tablespaces") },
+			func() { u.switchViewAndFocus("tablespaces") },
 		},
 		{
 			"[Tablas & Stats] Actualizar Estadisticas Stale & Compactar Tablas",
 			"Ejecuta DBMS_STATS.GATHER_TABLE_STATS y SHRINK SPACE en tablas fragmentadas",
-			func() { u.switchView("tables") },
+			func() { u.switchViewAndFocus("tables") },
 		},
 		{
 			"[Objetos] Recompilar Objetos Invalidos (utlrp.sql / COMPILE_SCHEMA)",
@@ -900,7 +1026,7 @@ func (u *AppUI) getAllMaintenanceActions() []menuAction {
 					"Recompilacion Global de Objetos Invalidos",
 					[]string{
 						"[SQL] EXEC UTL_RECOMP.RECOMP_PARALLEL(4);",
-						"[OK] 3 objetos invalidos recompilados con exito.",
+						"[OK] Objetos invalidos recompilados con exito.",
 					},
 					func() {
 						u.State.InvalidObjects = nil
@@ -913,17 +1039,17 @@ func (u *AppUI) getAllMaintenanceActions() []menuAction {
 		{
 			"[Usuarios/Locks] Analizar y Liberar Sesiones Bloqueantes (Row Lock Contention)",
 			"Inspecciona bloqueos TX/TM en gv$session y permite matar la sesion bloqueadora",
-			func() { u.switchView("sessions") },
+			func() { u.switchViewAndFocus("sessions") },
 		},
 		{
 			"[RMAN/Flashback] Backup Archivelog + Crear Punto de Restauracion Garantizado",
 			"Ejecuta backup previo a mantenimiento y crea GRP (Guaranteed Restore Point)",
-			func() { u.switchView("rman_dg") },
+			func() { u.switchViewAndFocus("rman_dg") },
 		},
 		{
 			"[Alert Log/ADR] Inspeccionar Errores ORA- y Purgar Trazas ADRCI",
-			"Analiza v$diag_alert_ext y libera espacio en /u01/app/oracle/diag",
-			func() { u.switchView("alert_log") },
+			"Analiza el Alert Log y libera espacio en /u01/app/oracle/diag",
+			func() { u.switchViewAndFocus("alert_log") },
 		},
 	}
 }
@@ -989,8 +1115,9 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 			u.showConfirmModal(actTitle, fn)
 		})
 	}
-	list.AddItem("▸ [Esc] Cancelar / Cerrar Ventana", "      Volver a la pantalla anterior", 0, func() {
+	list.AddItem("▸ [Esc / ←] Cancelar / Cerrar Ventana", "      Volver a la pantalla anterior", 0, func() {
 		u.Pages.RemovePage("modal")
+		u.focusFirstRightWindow()
 	})
 
 	modalFlex := tview.NewFlex().
@@ -1014,6 +1141,7 @@ func (u *AppUI) showConfirmModal(taskName string, onConfirm func()) {
 			if buttonIndex == 0 && onConfirm != nil {
 				onConfirm()
 			}
+			u.focusFirstRightWindow()
 		})
 	modal.SetBorder(true).SetTitle(" ══ CONFIRMACION DE SEGURIDAD ══ ")
 	u.Pages.AddPage("modal", modal, true, true)

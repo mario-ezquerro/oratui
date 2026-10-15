@@ -70,7 +70,7 @@ func ParseOCRLocContent(content string) model.TopologyMode {
 	return model.ModeRAC
 }
 
-// ParseOratabContent parses /etc/oratab content ignoring comments and empty lines.
+// ParseOratabContent parses /etc/oratab content ignoring comments, wildcard '*', and empty lines.
 func ParseOratabContent(content string) []OratabEntry {
 	var entries []OratabEntry
 	scanner := bufio.NewScanner(strings.NewReader(content))
@@ -87,7 +87,7 @@ func ParseOratabContent(content string) []OratabEntry {
 			if len(parts) >= 3 {
 				auto = strings.TrimSpace(parts[2])
 			}
-			if sid != "" && home != "" {
+			if sid != "" && sid != "*" && home != "" {
 				entries = append(entries, OratabEntry{
 					SID:        sid,
 					OracleHome: home,
@@ -99,14 +99,15 @@ func ParseOratabContent(content string) []OratabEntry {
 	return entries
 }
 
-// ScanProcPMON scans /proc/[0-9]*/cmdline (or comm) for ora_pmon_<SID>, db_pmon_<SID>, and asm_pmon_+ASM*.
-func ScanProcPMON(procRoot string) (dbSIDs []string, asmSID string) {
+// ScanProcPMON scans /proc/[0-9]*/cmdline for ora_pmon_<SID>, db_pmon_<SID>, and asm_pmon_+ASM*.
+// It also attempts to resolve ORACLE_HOME from /proc/[pid]/exe if not found in /etc/oratab.
+func ScanProcPMON(procRoot string) (dbSIDs []string, asmSID string, detectedDBHome string, detectedGridHome string) {
 	if procRoot == "" {
 		procRoot = "/proc"
 	}
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
-		return nil, ""
+		return nil, "", "", ""
 	}
 	seen := make(map[string]bool)
 	for _, entry := range entries {
@@ -125,15 +126,28 @@ func ScanProcPMON(procRoot string) (dbSIDs []string, asmSID string) {
 		cmdline = strings.TrimSpace(cmdline)
 		sid, isASM := ExtractSIDFromPMON(cmdline)
 		if sid != "" {
+			exePath, err := os.Readlink(filepath.Join(procRoot, name, "exe"))
+			homeFromExe := ""
+			if err == nil && strings.HasSuffix(exePath, "/bin/oracle") {
+				homeFromExe = strings.TrimSuffix(exePath, "/bin/oracle")
+			}
 			if isASM {
 				asmSID = sid
-			} else if !seen[sid] {
-				seen[sid] = true
-				dbSIDs = append(dbSIDs, sid)
+				if homeFromExe != "" && detectedGridHome == "" {
+					detectedGridHome = homeFromExe
+				}
+			} else {
+				if !seen[sid] {
+					seen[sid] = true
+					dbSIDs = append(dbSIDs, sid)
+				}
+				if homeFromExe != "" && detectedDBHome == "" {
+					detectedDBHome = homeFromExe
+				}
 			}
 		}
 	}
-	return dbSIDs, asmSID
+	return dbSIDs, asmSID, detectedDBHome, detectedGridHome
 }
 
 // ExtractSIDFromPMON extracts the SID from a process command line like ora_pmon_ORCL1, db_pmon_FREE, or asm_pmon_+ASM1.
@@ -157,20 +171,24 @@ func ExtractSIDFromPMON(cmdline string) (sid string, isASM bool) {
 type inventoryXML struct {
 	HomeList struct {
 		Homes []struct {
-			Name string `xml:"NAME,attr"`
-			Loc  string `xml:"LOC,attr"`
-			CRS  string `xml:"CRS,attr"`
+			Name    string `xml:"NAME,attr"`
+			Loc     string `xml:"LOC,attr"`
+			CRS     string `xml:"CRS,attr"`
+			Removed string `xml:"REMOVED,attr"`
 		} `xml:"HOME"`
 	} `xml:"HOME_LIST"`
 }
 
-// ParseInventoryXML extracts GridHome and OracleHome paths fromoraInventory/ContentsXML/inventory.xml.
+// ParseInventoryXML extracts GridHome and OracleHome paths from oraInventory/ContentsXML/inventory.xml.
 func ParseInventoryXML(xmlContent []byte) (gridHome string, dbHomes []string) {
 	var inv inventoryXML
 	if err := xml.Unmarshal(xmlContent, &inv); err != nil {
 		return "", nil
 	}
 	for _, h := range inv.HomeList.Homes {
+		if strings.EqualFold(h.Removed, "T") {
+			continue
+		}
 		if strings.EqualFold(h.CRS, "true") || strings.Contains(strings.ToLower(h.Name), "grid") || strings.Contains(strings.ToLower(h.Loc), "grid") {
 			if gridHome == "" {
 				gridHome = h.Loc
@@ -196,7 +214,6 @@ func Discover() (*DiscoveredEnvironment, error) {
 		env.Oratab = ParseOratabContent(string(data))
 	}
 
-	// Also check inventory.xml
 	invPaths := []string{
 		"/u01/app/oraInventory/ContentsXML/inventory.xml",
 		"/u01/app/oracle/oraInventory/ContentsXML/inventory.xml",
@@ -215,20 +232,28 @@ func Discover() (*DiscoveredEnvironment, error) {
 	}
 
 	for _, entry := range env.Oratab {
-		if strings.HasPrefix(entry.SID, "+ASM") {
-			if env.GridHome == "" {
+		if strings.HasPrefix(entry.SID, "+ASM") || strings.HasPrefix(entry.SID, "-MGMTDB") {
+			if env.GridHome == "" && strings.HasPrefix(entry.SID, "+ASM") {
 				env.GridHome = entry.OracleHome
 			}
-			env.ASMSID = entry.SID
+			if strings.HasPrefix(entry.SID, "+ASM") {
+				env.ASMSID = entry.SID
+			}
 		} else if env.OracleHome == "" {
 			env.OracleHome = entry.OracleHome
 		}
 	}
 
-	dbSIDs, asmSID := ScanProcPMON("/proc")
+	dbSIDs, asmSID, procDBHome, procGridHome := ScanProcPMON("/proc")
 	env.RunningSIDs = dbSIDs
 	if asmSID != "" {
 		env.ASMSID = asmSID
+	}
+	if env.OracleHome == "" && procDBHome != "" {
+		env.OracleHome = procDBHome
+	}
+	if env.GridHome == "" && procGridHome != "" {
+		env.GridHome = procGridHome
 	}
 
 	if env.OracleHome != "" {

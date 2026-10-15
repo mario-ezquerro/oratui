@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mario/ora-tui/internal/collector"
@@ -45,7 +47,7 @@ func main() {
 	if *mockFlag || !hasOracle {
 		state = collector.NewMockState(topo)
 	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		liveState, _, err := collector.CollectLiveEnvironment(ctx, runner)
 		cancel()
 		if err != nil || liveState == nil {
@@ -62,6 +64,15 @@ func main() {
 
 	appUI := ui.NewAppUI(state)
 
+	// Ensure Ctrl+C / SIGINT / SIGTERM always stops the TUI cleanly
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		appUI.App.Stop()
+		os.Exit(0)
+	}()
+
 	// Start non-blocking background refresh ticker when connected to a live Oracle host
 	if !state.IsMock && *intervalFlag > 0 {
 		go func() {
@@ -75,6 +86,7 @@ func main() {
 					appUI.App.QueueUpdateDraw(func() {
 						updated.BorderMode = appUI.State.BorderMode
 						appUI.State = updated
+						appUI.RefreshAll()
 					})
 				}
 			}
