@@ -297,12 +297,20 @@ func NewMockState(topology model.TopologyMode) *model.EnvironmentState {
 			},
 		},
 		AlertEntries: []model.AlertLogEntry{
-			{Timestamp: "2026-10-15 07:41:12", Instance: "PRODCDB1", Severity: "CRITICAL", ErrorCode: "ORA-01654", Message: "unable to extend index ERP_CORE.IDX_ORDERS_CUST_DT by 1024 in tablespace ERP_DATA_TBS"},
-			{Timestamp: "2026-10-15 07:38:05", Instance: "PRODCDB1", Severity: "WARNING", ErrorCode: "ORA-00060", Message: "deadlock detected while waiting for resource (SID 289 / SID 512)"},
-			{Timestamp: "2026-10-15 07:15:00", Instance: "PRODCDB2", Severity: "INFO", ErrorCode: "ARC-LOG", Message: "Thread 2 advanced to log sequence 84291 (LGWR switch)"},
-			{Timestamp: "2026-10-15 06:30:44", Instance: "PRODCDB1", Severity: "WARNING", ErrorCode: "ORA-3136", Message: "inbound connection timed out (ORA-3136) from client 10.20.88.14"},
-			{Timestamp: "2026-10-15 03:18:22", Instance: "PRODCDB1", Severity: "INFO", ErrorCode: "RMAN-BKP", Message: "Starting backup of datafile 1..18 (Incremental Level 1)"},
+			{Timestamp: "2026-10-15 07:41:12", Instance: "PRODCDB1", Severity: "ORA-ERROR", ErrorCode: "ORA-01654", Message: "ORA-01654: unable to extend index ERP_CORE.IDX_ORDERS_CUST_DT by 1024 in tablespace ERP_DATA_TBS"},
+			{Timestamp: "2026-10-15 07:38:05", Instance: "PRODCDB1", Severity: "ORA-ERROR", ErrorCode: "ORA-00060", Message: "ORA-00060: Deadlock detected. More info in file /u01/app/oracle/diag/rdbms/prodcdb/PRODCDB1/trace/PRODCDB1_ora_18492.trc"},
+			{Timestamp: "2026-10-15 06:30:44", Instance: "PRODCDB1", Severity: "ORA-ERROR", ErrorCode: "ORA-03136", Message: "ORA-03136: inbound connection timed out from client 10.20.88.14"},
 		},
+		AlertTailLines: []string{
+			"[2026-10-15 07:15:00] Thread 1 advanced to log sequence 84290 (LGWR switch)",
+			"[2026-10-15 07:15:01] Current log# 2 seq# 84290 mem# 0: +REDO/PRODCDB/ONLINELOG/group_2.262.112",
+			"[2026-10-15 07:15:03] Archived Log entry 84289 added for T-1.S-84289 ID 0x41a8bc12 LAD:1",
+			"[2026-10-15 07:38:05] ORA-00060: Deadlock detected. More info in file .../PRODCDB1_ora_18492.trc",
+			"[2026-10-15 07:41:12] ORA-01654: unable to extend index ERP_CORE.IDX_ORDERS_CUST_DT in ERP_DATA_TBS",
+			"[2026-10-15 08:00:00] Thread 1 advanced to log sequence 84291 (LGWR switch)",
+		},
+		DiagTraceDir:    "/u01/app/oracle/diag/rdbms/prodcdb/PRODCDB1/trace",
+		AlertFileSizeMB: 14.8,
 	}
 
 	if topology == model.ModeSingle {

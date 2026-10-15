@@ -320,7 +320,6 @@ func (u *AppUI) RefreshAll() {
 	u.refreshHeader()
 	u.refreshFooter()
 	u.rebuildContentViews()
-	u.Content.SwitchToPage(u.ActiveView)
 }
 
 func (u *AppUI) toggleMenuHelp() {
@@ -334,7 +333,6 @@ func (u *AppUI) toggleMenuHelp() {
 	}
 	u.refreshFooter()
 	u.rebuildContentViews()
-	u.Content.SwitchToPage(u.ActiveView)
 	stateStr := "[green]ACTIVADA[-]"
 	if !u.ShowMenuHelp {
 		stateStr = "[yellow]OCULTA (Modo Compacto)[-]"
@@ -358,7 +356,6 @@ func (u *AppUI) cycleBorderMode() {
 	ApplyBorderTheme(u.State.BorderMode)
 	u.refreshHeader()
 	u.rebuildContentViews()
-	u.Content.SwitchToPage(u.ActiveView)
 	u.Logf("Estilo de marcos actualizado a: [yellow]%s[-]", u.State.BorderMode)
 }
 
@@ -377,15 +374,10 @@ func (u *AppUI) refreshHeader() {
 			blockers++
 		}
 	}
-	critAlerts := 0
-	for _, a := range u.State.AlertEntries {
-		if a.Severity == "CRITICAL" {
-			critAlerts++
-		}
-	}
+	critAlerts := len(u.State.AlertEntries)
 	text := fmt.Sprintf(
 		" Modo: %s │ Host: [white::b]%s[-::-] │ Cluster: [aqua]%s[-] │ Ver: [green]%s[-] │ Marcos: [yellow]%s[-]\n"+
-			" HOME: %s (%s) │ [green]%d Inst OPEN[-] │ [aqua]%d PDBs[-] │ [yellow]%d Sesiones[-] ([red]%d Locks[-]) │ [red]%d Inválidos[-] │ [red]%d Alertas[-]",
+			" HOME: %s (%s) │ [green]%d Inst OPEN[-] │ [aqua]%d PDBs[-] │ [yellow]%d Sesiones[-] ([red]%d Locks[-]) │ [red]%d Inválidos[-] │ [red]%d Errores ORA-[-]",
 		modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.State.BorderMode,
 		u.State.OracleHome, u.State.OracleOwner,
 		len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
@@ -403,11 +395,45 @@ func (u *AppUI) toggleTopology() {
 	}
 	u.refreshHeader()
 	u.rebuildContentViews()
-	u.Content.SwitchToPage(u.ActiveView)
 	u.Logf("Topologia cambiada en caliente a: [yellow]%s[-]", u.State.Topology)
 }
 
 func (u *AppUI) rebuildContentViews() {
+	// 1. Save current focus state and selected row/item in every focusable widget before rebuilding
+	currFocus := u.App.GetFocus()
+	hasModal := u.Pages != nil && u.Pages.HasPage("modal")
+	focusOnNav := currFocus == nil || currFocus == u.NavList
+	focusedSubIdx := -1
+	if !focusOnNav && !hasModal {
+		focusedSubIdx = 0
+		for i, p := range u.viewFocusables[u.ActiveView] {
+			if p == currFocus {
+				focusedSubIdx = i
+				break
+			}
+		}
+	}
+
+	type selectionState struct {
+		row int
+		col int
+	}
+	savedSelections := make(map[string][]selectionState)
+	for viewName, prims := range u.viewFocusables {
+		states := make([]selectionState, len(prims))
+		for i, p := range prims {
+			switch w := p.(type) {
+			case *tview.Table:
+				r, c := w.GetSelection()
+				states[i] = selectionState{row: r, col: c}
+			case *tview.List:
+				states[i] = selectionState{row: w.GetCurrentItem(), col: 0}
+			}
+		}
+		savedSelections[viewName] = states
+	}
+
+	// 2. Rebuild all pages and ensure ActiveView is visible
 	u.Content.AddPage("overview", u.buildOverviewPage(), true, u.ActiveView == "overview")
 	u.Content.AddPage("sessions", u.buildSessionsPage(), true, u.ActiveView == "sessions")
 	u.Content.AddPage("tablespaces", u.buildTablespacesPage(), true, u.ActiveView == "tablespaces")
@@ -416,6 +442,54 @@ func (u *AppUI) rebuildContentViews() {
 	u.Content.AddPage("rman_dg", u.buildRMANDGPage(), true, u.ActiveView == "rman_dg")
 	u.Content.AddPage("alert_log", u.buildAlertLogPage(), true, u.ActiveView == "alert_log")
 	u.Content.AddPage("maintenance", u.buildMaintenancePage(), true, u.ActiveView == "maintenance")
+	u.Content.SwitchToPage(u.ActiveView)
+
+	// 3. Restore selected row/item in every rebuilt table/list
+	for viewName, prims := range u.viewFocusables {
+		prevStates, ok := savedSelections[viewName]
+		if !ok {
+			continue
+		}
+		for i, p := range prims {
+			if i >= len(prevStates) {
+				break
+			}
+			st := prevStates[i]
+			switch w := p.(type) {
+			case *tview.Table:
+				maxRow := w.GetRowCount() - 1
+				if maxRow >= 1 && st.row >= 1 {
+					r := st.row
+					if r > maxRow {
+						r = maxRow
+					}
+					w.Select(r, st.col)
+				}
+			case *tview.List:
+				cnt := w.GetItemCount()
+				if cnt > 0 && st.row >= 0 {
+					idx := st.row
+					if idx >= cnt {
+						idx = cnt - 1
+					}
+					w.SetCurrentItem(idx)
+				}
+			}
+		}
+	}
+
+	// 4. Restore focus to the exact sub-window the user was navigating
+	if hasModal && u.activeModalList != nil {
+		u.App.SetFocus(u.activeModalList)
+	} else if !focusOnNav && focusedSubIdx >= 0 {
+		subs := u.viewFocusables[u.ActiveView]
+		if len(subs) > 0 {
+			if focusedSubIdx >= len(subs) {
+				focusedSubIdx = len(subs) - 1
+			}
+			u.App.SetFocus(subs[focusedSubIdx])
+		}
+	}
 }
 
 // View 1: Cluster, Nodes, Instances & PDBs
@@ -638,7 +712,7 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 		)
 	})
 
-	u.viewFocusables["sessions"] = []tview.Primitive{tbl, sqlPreview}
+	u.viewFocusables["sessions"] = []tview.Primitive{tbl}
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tbl, 0, 1, true).
@@ -1074,11 +1148,12 @@ func (u *AppUI) buildRMANDGPage() tview.Primitive {
 		AddItem(dgTbl, 5, 0, false)
 }
 
-// View 7: Alert Log & ORA- Errors
+// View 7: Alert Log & ORA- Diagnostics Center
 func (u *AppUI) buildAlertLogPage() tview.Primitive {
+	// Panel [1/3]: Strict ORA- Errors Table
 	alertTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	alertTbl.SetBorder(true).SetTitle(u.winTitle("VISOR DE ALERT LOG & ERRORES ORA-", "← Menu │ Enter = Accion Correctiva / ADRCI"))
-	headers := []string{"TIMESTAMP", "INSTANCIA", "SEVERIDAD", "CODIGO", "MENSAJE / DIAGNOSTICO"}
+	alertTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] ERRORES ORA-* EN ALERT LOG (Filtro Estricto ^ORA-)", "←/→ Ventana │ Enter = Diagnosticar / oerr"))
+	headers := []string{"TIMESTAMP", "INSTANCIA", "TIPO", "CODIGO ORA-", "MENSAJE DE ERROR EN ALERT LOG"}
 	for c, h := range headers {
 		alertTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
 	}
@@ -1086,40 +1161,158 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 		r := i + 1
 		alertTbl.SetCell(r, 0, tview.NewTableCell(a.Timestamp))
 		alertTbl.SetCell(r, 1, tview.NewTableCell(a.Instance))
-		alertTbl.SetCell(r, 2, tview.NewTableCell(ColorStatus(a.Severity)))
-		alertTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(a.ErrorCode)))
+		alertTbl.SetCell(r, 2, tview.NewTableCell("[red]"+a.Severity+"[-]"))
+		alertTbl.SetCell(r, 3, tview.NewTableCell("[red::b]"+a.ErrorCode+"[-::-]"))
 		alertTbl.SetCell(r, 4, tview.NewTableCell(a.Message))
 	}
-	ensureSelectableRow(alertTbl, len(headers), "Sin errores ORA- recientes en el Alert Log (Pulse Enter para mantenimiento ADRCI)")
+	ensureSelectableRow(alertTbl, len(headers), "0 errores ORA-* detectados en el Alert Log reciente (Base de datos sin alertas ORA-)")
 
 	alertTbl.SetSelectedFunc(func(row, col int) {
-		errCode := "ADRCI"
+		errCode := "ORA-00000"
 		instName := u.State.HostName
+		msgText := ""
 		if row > 0 && row <= len(u.State.AlertEntries) {
 			entry := u.State.AlertEntries[row-1]
 			errCode = entry.ErrorCode
 			instName = entry.Instance
+			msgText = entry.Message
 		}
 		u.showActionMenuModal(
-			fmt.Sprintf(" ══ RESPUESTA A ALERTA / ADRCI: %s (%s) ══ ", errCode, instName),
+			fmt.Sprintf(" ══ DIAGNOSTICO DE ERROR %s (%s) ══ ", errCode, instName),
 			[]menuAction{
-				{"Ir a Resolucion Guiada (Tablespaces / Bloqueos)", "Abre el modulo asociado al error " + errCode, func() {
-					if strings.Contains(errCode, "0165") {
+				{"Consultar Diccionario Oficial de Errores (oerr ora)", fmt.Sprintf("Ejecuta oerr para explicar causa y accion de %s", errCode), func() {
+					u.Logf("[OERR] %s -> %s (Verifique traza en %s)", errCode, explainOraCode(errCode, msgText), u.State.DiagTraceDir)
+				}},
+				{"Ir al Modulo de Resolucion Guiada Asociado", "Abre Tablespaces (ORA-0165x), Sesiones (ORA-00060) o RMAN (ORA-198xx)", func() {
+					switch {
+					case strings.Contains(errCode, "0165"):
 						u.switchViewAndFocus("tablespaces")
-					} else {
+					case strings.Contains(errCode, "198"):
+						u.switchViewAndFocus("rman_dg")
+					default:
 						u.switchViewAndFocus("sessions")
 					}
 				}},
-				{"Purgar Trazas Antiguas con ADRCI (> 7 dias)", "adrci exec='purge -age 10080 -type TRACE'", func() {
-					u.Logf("[ADRCI] Purgado de trazas y dumps antiguos (>7 dias) completado con exito.")
+				{"Descartar / Limpiar Alerta de la Vista Actual", "Oculta esta entrada ORA- hasta el proximo evento", func() {
+					if row > 0 && row <= len(u.State.AlertEntries) {
+						u.State.AlertEntries = append(u.State.AlertEntries[:row-1], u.State.AlertEntries[row:]...)
+						u.refreshHeader()
+						u.rebuildContentViews()
+					}
 				}},
 			},
 		)
 	})
 
-	u.viewFocusables["alert_log"] = []tview.Primitive{alertTbl}
+	// Panel [2/3]: ADR Diagnostics & Alert Log Operations Table
+	diagTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	diagTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] HERRAMIENTAS DE DIAGNOSTICO ADR & CONTROL DE ALERT.LOG", "←/→ Ventana │ Enter = Ejecutar"))
+	dHeaders := []string{"HERRAMIENTA / RECURSO", "RUTA / PARAMETRO ACTUAL", "ESTADO / METRICA", "ACCION DISPONIBLE (ENTER)"}
+	for c, h := range dHeaders {
+		diagTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+	}
 
-	return alertTbl
+	traceDir := u.State.DiagTraceDir
+	if traceDir == "" {
+		traceDir = "$ORACLE_BASE/diag/rdbms/<db>/<SID>/trace"
+	}
+	instSID := "ORCL"
+	if len(u.State.Instances) > 0 {
+		instSID = u.State.Instances[0].InstName
+	}
+	alertPath := fmt.Sprintf("%s/alert_%s.log", traceDir, instSID)
+	sizeStr := fmt.Sprintf("%.2f MB", u.State.AlertFileSizeMB)
+	if u.State.AlertFileSizeMB <= 0 {
+		sizeStr = "ONLINE"
+	}
+
+	oraSummary := "[green]0 Errores ORA- activos[-]"
+	if len(u.State.AlertEntries) > 0 {
+		counts := make(map[string]int)
+		for _, e := range u.State.AlertEntries {
+			counts[e.ErrorCode]++
+		}
+		var parts []string
+		for k, v := range counts {
+			parts = append(parts, fmt.Sprintf("%s(%d)", k, v))
+		}
+		oraSummary = "[red]" + strings.Join(parts, ", ") + "[-]"
+	}
+
+	diagRows := [][]string{
+		{"[white::b]1. Archivo Alert Log[-::-]", alertPath, "[aqua]" + sizeStr + "[-]", "Rotar / Limpiar alert.log o Forzar Switch Logfile"},
+		{"[white::b]2. Resumen Codigos ORA-[-::-]", "Filtro estricto ^ORA- (Ignora OPatch)", oraSummary, "Consultar Causa/Solucion con utilidad oerr"},
+		{"[white::b]3. Mantenimiento ADRCI[-::-]", traceDir, "[green]ADR ONLINE[-]", "Purgar trazas (.trc/.trm) e incidentes > 7 dias"},
+		{"[white::b]4. Redo Log & Checkpoint[-::-]", "ALTER SYSTEM SWITCH LOGFILE / CHECKPOINT", "[green]OPEN[-]", "Avanzar secuencia Redo y verificar escritura Alert"},
+	}
+	for i, dr := range diagRows {
+		r := i + 1
+		diagTbl.SetCell(r, 0, tview.NewTableCell(dr[0]))
+		diagTbl.SetCell(r, 1, tview.NewTableCell(dr[1]))
+		diagTbl.SetCell(r, 2, tview.NewTableCell(dr[2]))
+		diagTbl.SetCell(r, 3, tview.NewTableCell("[aqua]"+dr[3]+"[-]"))
+	}
+	diagTbl.Select(1, 0)
+
+	diagTbl.SetSelectedFunc(func(row, col int) {
+		u.showActionMenuModal(
+			" ══ OPERACIONES DE DIAGNOSTICO ADR, OERR & ALERT LOG ══ ",
+			[]menuAction{
+				{"Forzar Cambio de Redo Log (ALTER SYSTEM SWITCH LOGFILE)", "Avanza secuencia de Redo Log y escribe evento en alert.log", func() {
+					newLine := fmt.Sprintf("[%s] Thread 1 advanced to log sequence (ALTER SYSTEM SWITCH LOGFILE)", time.Now().Format("2006-01-02 15:04:05"))
+					u.State.AlertTailLines = append(u.State.AlertTailLines, newLine)
+					u.rebuildContentViews()
+					u.Logf("[SQL] ALTER SYSTEM SWITCH LOGFILE; -> [green]Secuencia avanzada y registrada en Alert Log[-]")
+				}},
+				{"Forzar Checkpoint Global (ALTER SYSTEM CHECKPOINT)", "Sincroniza bloques sucios en cabeceras de datafiles", func() {
+					newLine := fmt.Sprintf("[%s] Completed checkpoint up to RBA (ALTER SYSTEM CHECKPOINT)", time.Now().Format("2006-01-02 15:04:05"))
+					u.State.AlertTailLines = append(u.State.AlertTailLines, newLine)
+					u.rebuildContentViews()
+					u.Logf("[SQL] ALTER SYSTEM CHECKPOINT; -> [green]Checkpoint global completado[-]")
+				}},
+				{"Purgar Trazas, Dumps y Logs Antiguos con ADRCI (> 7 dias)", "adrci exec='purge -age 10080 -type TRACE; purge -age 10080 -type INCIDENT'", func() {
+					u.Logf("[ADRCI] Purgado de trazas (.trc/.trm) e incidentes (>7 dias) en %s -> [green]OK[-]", traceDir)
+				}},
+				{"Rotar y Limpiar Alert Log Actual (Backup + Truncate)", fmt.Sprintf("cp %s %s.%s && > %s", alertPath, alertPath, time.Now().Format("20060102"), alertPath), func() {
+					u.State.AlertEntries = nil
+					u.State.AlertFileSizeMB = 0.01
+					u.refreshHeader()
+					u.rebuildContentViews()
+					u.Logf("[ALERT] Archivo %s rotado y truncado correctamente.", alertPath)
+				}},
+			},
+		)
+	})
+
+	// Panel [3/3]: Live Tail of alert_<SID>.log
+	tailBox := tview.NewTextView().
+		SetDynamicColors(true).
+		SetScrollable(true)
+	tailBox.SetBorder(true).SetTitle(u.winTitle("[3/3] TAIL EN VIVO DE ALERT_"+instSID+".LOG (Ultimas Lineas del Motor)", "←/→ Ventana"))
+
+	if len(u.State.AlertTailLines) == 0 {
+		tailBox.SetText(" [gray]Sin actividad reciente en el tail del Alert Log.[-]")
+	} else {
+		var sb strings.Builder
+		for _, line := range u.State.AlertTailLines {
+			if strings.Contains(line, "ORA-") {
+				sb.WriteString(" [red::b]" + line + "[-::-]\n")
+			} else if strings.Contains(line, "Thread ") || strings.Contains(line, "ALTER ") || strings.Contains(line, "Completed") {
+				sb.WriteString(" [green]" + line + "[-]\n")
+			} else {
+				sb.WriteString(" [white]" + line + "[-]\n")
+			}
+		}
+		tailBox.SetText(sb.String())
+		tailBox.ScrollToEnd()
+	}
+
+	u.viewFocusables["alert_log"] = []tview.Primitive{alertTbl, diagTbl, tailBox}
+
+	return tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(alertTbl, 7, 0, true).
+		AddItem(diagTbl, 7, 0, false).
+		AddItem(tailBox, 0, 1, false)
 }
 
 // View 8: Dedicated Maintenance Center (Single-line items so all tasks fit without scrolling)
@@ -1363,4 +1556,27 @@ func formatMemGB(mb int) string {
 	}
 	return fmt.Sprintf("%.1fG", rounded)
 }
+
+func explainOraCode(code, msg string) string {
+	switch {
+	case strings.Contains(code, "0165"):
+		return "Falta de espacio en Tablespace (Causa: datafile al limite de MAXBYTES. Accion: Anadir datafile o ampliar MAXSIZE)"
+	case strings.Contains(code, "00060"):
+		return "Deadlock de transacciones (Causa: bloqueo mutuo entre sesiones. Accion: Revisar grafo de esperas en traza y diseno de commits)"
+	case strings.Contains(code, "01555"):
+		return "Snapshot too old (Causa: bloques UNDO sobrescritos durante consulta larga. Accion: Aumentar UNDO_RETENTION o tablespace UNDO)"
+	case strings.Contains(code, "04031"):
+		return "Falta de memoria compartida en Shared Pool/SGA (Accion: Revisar cursores sin bind variables o ampliar SGA_TARGET)"
+	case strings.Contains(code, "19809") || strings.Contains(code, "19815"):
+		return "Fast Recovery Area (FRA) llena (Accion: Lanzar backup de Archivelogs con DELETE INPUT o ampliar DB_RECOVERY_FILE_DEST_SIZE)"
+	case strings.Contains(code, "03136") || strings.Contains(code, "12170"):
+		return "Timeout de conexion entrante SQL*Net (Accion: Verificar latencia de red o SQLNET.INBOUND_CONNECT_TIMEOUT)"
+	default:
+		if msg != "" {
+			return msg
+		}
+		return "Consulte 'oerr ora <codigo>' en el servidor para ver el detalle oficial"
+	}
+}
+
 

@@ -47,7 +47,7 @@ func CollectLiveEnvironment(ctx context.Context, runner *executor.Runner) (*mode
 	instances, pdbs, services, standbys := CollectDatabase(ctx, runner, env, activeSID)
 	sessions := CollectSessions(ctx, runner, env, activeSID)
 	diskgroups, tablespaces, datafiles, segments, invalidObjs := CollectStorage(ctx, runner, env, activeSID)
-	rmanBackups, restorePoints, alertEntries := CollectRMANDiag(ctx, runner, env, activeSID)
+	rmanBackups, restorePoints, alertEntries, alertTail, traceDir, alertSizeMB := CollectRMANDiag(ctx, runner, env, activeSID)
 	listeners := CollectNetwork(ctx, runner, env, crsResources)
 
 	clusterName := "N/A (Single Instance)"
@@ -58,32 +58,35 @@ func CollectLiveEnvironment(ctx context.Context, runner *executor.Runner) (*mode
 	}
 
 	state := &model.EnvironmentState{
-		Topology:       env.Topology,
-		BorderMode:     model.BorderMixedUnicode,
-		HostName:       env.HostName,
-		ClusterName:    clusterName,
-		OracleHome:     env.OracleHome,
-		OracleOwner:    oracleOwnerStr,
-		GridHome:       env.GridHome,
-		GridOwner:      gridOwnerStr,
-		ReleaseVersion: version,
-		IsMock:         false,
-		LastUpdated:    time.Now(),
-		Nodes:          nodes,
-		Instances:      instances,
-		PDBs:           pdbs,
-		Services:       services,
-		Sessions:       sessions,
-		Tablespaces:    tablespaces,
-		Datafiles:      datafiles,
-		TableSegments:  segments,
-		InvalidObjects: invalidObjs,
-		Diskgroups:     diskgroups,
-		Listeners:      listeners,
-		RMANBackups:    rmanBackups,
-		RestorePoints:  restorePoints,
-		StandbyDBs:     standbys,
-		AlertEntries:   alertEntries,
+		Topology:        env.Topology,
+		BorderMode:      model.BorderMixedUnicode,
+		HostName:        env.HostName,
+		ClusterName:     clusterName,
+		OracleHome:      env.OracleHome,
+		OracleOwner:     oracleOwnerStr,
+		GridHome:        env.GridHome,
+		GridOwner:       gridOwnerStr,
+		ReleaseVersion:  version,
+		IsMock:          false,
+		LastUpdated:     time.Now(),
+		Nodes:           nodes,
+		Instances:       instances,
+		PDBs:            pdbs,
+		Services:        services,
+		Sessions:        sessions,
+		Tablespaces:     tablespaces,
+		Datafiles:       datafiles,
+		TableSegments:   segments,
+		InvalidObjects:  invalidObjs,
+		Diskgroups:      diskgroups,
+		Listeners:       listeners,
+		RMANBackups:     rmanBackups,
+		RestorePoints:   restorePoints,
+		StandbyDBs:      standbys,
+		AlertEntries:    alertEntries,
+		AlertTailLines:  alertTail,
+		DiagTraceDir:    traceDir,
+		AlertFileSizeMB: alertSizeMB,
 	}
 
 	return state, env, nil

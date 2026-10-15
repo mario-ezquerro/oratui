@@ -230,6 +230,9 @@ type EnvironmentState struct {
 	Listeners      []ListenerInfo
 	RMANBackups    []RMANBackupJob
 	RestorePoints  []RestorePoint
-	StandbyDBs     []DataGuardStandby
-	AlertEntries   []AlertLogEntry
+	StandbyDBs      []DataGuardStandby
+	AlertEntries    []AlertLogEntry
+	AlertTailLines  []string
+	DiagTraceDir    string
+	AlertFileSizeMB float64
 }
