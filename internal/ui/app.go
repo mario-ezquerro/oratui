@@ -100,30 +100,31 @@ func (u *AppUI) activeViewNavIndex() int {
 }
 
 // decorateTitle formats a window's border title according to the active theme and focus state:
-// - Norton Commander: Teal (#00A8A8) title badge with Black text when focused; Bright Cyan (#55FFFF) when unfocused.
-// - Borland Turbo C++ 3.0: Bright White title with Green [■] close box and [↑] zoom arrow when focused.
-// - Green Phosphor CRT: Inverse Bright Green (#33FF33) badge with dark #001000 text when focused.
+// - Norton Commander: Teal (#00AFAF) title badge with Black text when focused; Bright Cyan (#5FFFFF) when unfocused.
+// - Borland Turbo C++ 3.0: Bright White title with Green [■] close box and =1=[↑] zoom arrow on Blue windows,
+//   or Dark Blue (#0000AF) title with White [■] close box on the bottom Teal/Cyan (#00AFAF) "Project:" window.
+// - Green Phosphor CRT: Inverse Bright Green (#00FF5F) badge with dark #001000 text when focused.
 func (u *AppUI) decorateTitle(raw string, hasFocus bool) string {
 	raw = strings.TrimSpace(raw)
 	switch u.ColorTheme {
 	case ThemeNorton:
 		if hasFocus {
-			return fmt.Sprintf("[#000000:#00a8a8:b] %s [-:-:-]", raw)
+			return fmt.Sprintf("[#000000:#00afaf:b] %s [-:-:-]", raw)
 		}
-		return fmt.Sprintf("[#55ffff] %s [-]", raw)
+		return fmt.Sprintf("[#5fffff] %s [-]", raw)
 	case ThemeTurboC:
 		if hasFocus {
-			return fmt.Sprintf("[#ffffff][[#55ff55::b]■[#ffffff]] %s [[#55ff55::b]↑[#ffffff]][-]", raw)
+			return fmt.Sprintf("[#ffffff][[#5fff5f::b]■[#ffffff]]═ %s ═1=[[#5fff5f::b]↑[#ffffff]][-]", raw)
 		}
-		return fmt.Sprintf("[#55ffff] %s [-]", raw)
+		return fmt.Sprintf("[#ffffff] %s [-]", raw)
 	case ThemeGreenPhosphor:
 		if hasFocus {
-			return fmt.Sprintf("[#001000:#33ff33:b] %s [-:-:-]", raw)
+			return fmt.Sprintf("[#001000:#00ff5f:b] %s [-:-:-]", raw)
 		}
-		return fmt.Sprintf("[#00a800] %s [-]", raw)
+		return fmt.Sprintf("[#00af00] %s [-]", raw)
 	default:
 		if hasFocus {
-			return fmt.Sprintf("[#55ffff::b] %s [-::-]", raw)
+			return fmt.Sprintf("[#5fffff::b] %s [-::-]", raw)
 		}
 		return fmt.Sprintf(" %s ", raw)
 	}
@@ -131,7 +132,7 @@ func (u *AppUI) decorateTitle(raw string, hasFocus bool) string {
 
 // updateFocusVisuals applies the active color palette (Norton Commander / Borland Turbo C / Green Phosphor / Dark),
 // highlights the currently focused/hovered window and row in high-contrast colors,
-// and dims unfocused windows so the user always knows which menu or table option the mouse is over.
+// and styles secondary/bottom panels according to the authentic MS-DOS screenshots.
 func (u *AppUI) updateFocusVisuals() {
 	if u.NavList == nil {
 		return
@@ -140,18 +141,55 @@ func (u *AppUI) updateFocusVisuals() {
 	currFocus := u.App.GetFocus()
 	hasModal := u.Pages != nil && u.Pages.HasPage("modal")
 
-	// In Mixed Unicode border mode:
-	// - Borland Turbo C dropdown submenus use a Single Black border (┌─┐│└┘) just like Turbo C++ 3.0,
-	//   while focused editor/table windows and Norton Commander dialogs use Double borders (╔═╗║╚╝).
+	// Configure box-drawing borders per theme in BorderMixedUnicode mode:
+	// - Norton Commander (Screenshot 2): Double Bright Cyan (╔═╗║╚╝) on all panels, and Double Bright White on popup dialogs.
+	// - Borland Turbo C++ 3.0 (Screenshot 1): Double Bright White (╔═╗║╚╝) on Blue windows, Single Black (┌─┐│└┘) on Silver dropdown menus.
+	// - Green Phosphor / Dark: Single on unfocused, Double on focused/modals.
 	if u.State.BorderMode == model.BorderMixedUnicode {
-		if hasModal && u.ColorTheme == ThemeTurboC {
-			tview.Borders.HorizontalFocus = '─'
-			tview.Borders.VerticalFocus = '│'
-			tview.Borders.TopLeftFocus = '┌'
-			tview.Borders.TopRightFocus = '┐'
-			tview.Borders.BottomLeftFocus = '└'
-			tview.Borders.BottomRightFocus = '┘'
-		} else {
+		switch u.ColorTheme {
+		case ThemeNorton:
+			tview.Borders.Horizontal = '═'
+			tview.Borders.Vertical = '║'
+			tview.Borders.TopLeft = '╔'
+			tview.Borders.TopRight = '╗'
+			tview.Borders.BottomLeft = '╚'
+			tview.Borders.BottomRight = '╝'
+			tview.Borders.HorizontalFocus = '═'
+			tview.Borders.VerticalFocus = '║'
+			tview.Borders.TopLeftFocus = '╔'
+			tview.Borders.TopRightFocus = '╗'
+			tview.Borders.BottomLeftFocus = '╚'
+			tview.Borders.BottomRightFocus = '╝'
+		case ThemeTurboC:
+			tview.Borders.Horizontal = '═'
+			tview.Borders.Vertical = '║'
+			tview.Borders.TopLeft = '╔'
+			tview.Borders.TopRight = '╗'
+			tview.Borders.BottomLeft = '╚'
+			tview.Borders.BottomRight = '╝'
+			if hasModal {
+				// Turbo C++ 3.0 dropdown menu uses a Single Black border inside its Silver rim
+				tview.Borders.HorizontalFocus = '─'
+				tview.Borders.VerticalFocus = '│'
+				tview.Borders.TopLeftFocus = '┌'
+				tview.Borders.TopRightFocus = '┐'
+				tview.Borders.BottomLeftFocus = '└'
+				tview.Borders.BottomRightFocus = '┘'
+			} else {
+				tview.Borders.HorizontalFocus = '═'
+				tview.Borders.VerticalFocus = '║'
+				tview.Borders.TopLeftFocus = '╔'
+				tview.Borders.TopRightFocus = '╗'
+				tview.Borders.BottomLeftFocus = '╚'
+				tview.Borders.BottomRightFocus = '╝'
+			}
+		default:
+			tview.Borders.Horizontal = '─'
+			tview.Borders.Vertical = '│'
+			tview.Borders.TopLeft = '┌'
+			tview.Borders.TopRight = '┐'
+			tview.Borders.BottomLeft = '└'
+			tview.Borders.BottomRight = '┘'
 			tview.Borders.HorizontalFocus = '═'
 			tview.Borders.VerticalFocus = '║'
 			tview.Borders.TopLeftFocus = '╔'
@@ -163,19 +201,20 @@ func (u *AppUI) updateFocusVisuals() {
 
 	if u.Header != nil {
 		u.Header.SetBackgroundColor(pal.HeaderBg)
+		u.Header.SetTextColor(pal.HeaderFg)
 		switch u.ColorTheme {
 		case ThemeTurboC:
 			u.Header.SetBorderColor(VGABlack)
 			u.Header.SetTitleColor(VGABlack)
-			u.Header.SetTitle("[#000000:#a8a8a8:b] [[#a80000::b]≡[#000000]] BORLAND TURBO ORA-TUI 3.0 :: ORACLE CLUSTER & DB MANAGER [-:-:-]")
+			u.Header.SetTitle("[#000000:#a8a8a8:b] [[#af0000::b]≡[#000000]] File  Edit  Search  Run  Compile  Debug  Project  Options  Window  Help [-:-:-]")
 		case ThemeNorton:
 			u.Header.SetBorderColor(VGABrightCyan)
 			u.Header.SetTitleColor(VGABrightYellow)
-			u.Header.SetTitle("[#000000:#00a8a8:b] NORTON COMMANDER ORA-TUI :: ORACLE CLUSTER & DB MANAGER [-:-:-]")
+			u.Header.SetTitle("[#000000:#00afaf:b] NORTON COMMANDER ORA-TUI :: ORACLE CLUSTER & DB MANAGER [-:-:-]")
 		case ThemeGreenPhosphor:
 			u.Header.SetBorderColor(PhosphorGlow)
 			u.Header.SetTitleColor(PhosphorGlow)
-			u.Header.SetTitle("[#001000:#33ff33:b] IBM 5151 P1 PHOSPHOR CRT :: ORA-TUI ORACLE MANAGER [-:-:-]")
+			u.Header.SetTitle("[#001000:#00ff5f:b] IBM 5151 P1 PHOSPHOR CRT :: ORA-TUI ORACLE MANAGER [-:-:-]")
 		default:
 			u.Header.SetBorderColor(pal.ActiveBorder)
 			u.Header.SetTitleColor(pal.ActiveTitle)
@@ -184,21 +223,25 @@ func (u *AppUI) updateFocusVisuals() {
 	}
 	if u.LogView != nil {
 		u.LogView.SetBackgroundColor(pal.LogBg)
+		u.LogView.SetTextColor(pal.LogFg)
 		u.LogView.SetBorderColor(pal.LogBorder)
 		u.LogView.SetTitleColor(pal.LogFg)
 		switch u.ColorTheme {
 		case ThemeTurboC:
-			u.LogView.SetTitle("[#0000a8:#00a8a8:b] [[#ffffff::b]■[#0000a8]] Project: CONSOLA DE EJECUCION & AUDITORIA EN VIVO [-:-:-]")
+			// Exact match to the bottom Teal/Cyan (#00AFAF) "Project: MCIRCLE" window in Screenshot 1
+			u.LogView.SetTitle("[#0000af:#00afaf:b] [[#ffffff::b]■[#0000af]]─── Project: CONSOLA DE EJECUCION & AUDITORIA ─── 2 ───[-:-:-]")
 		case ThemeNorton:
-			u.LogView.SetTitle("[#000000:#00a8a8:b] MS-DOS C:\\ORACLE> CONSOLA DE EJECUCION & AUDITORIA [-:-:-]")
+			// Exact match to the bottom Black (#000000) MS-DOS C:\> prompt area in Screenshot 2
+			u.LogView.SetTitle("[#000000:#00afaf:b] C:\\ORACLE> CONSOLA MS-DOS & AUDITORIA EN VIVO [-:-:-]")
 		case ThemeGreenPhosphor:
-			u.LogView.SetTitle("[#00a800] [CONSOLA DE EJECUCION & AUDITORIA EN VIVO] [-]")
+			u.LogView.SetTitle("[#00af00] [CONSOLA DE EJECUCION & AUDITORIA EN VIVO] [-]")
 		default:
 			u.LogView.SetTitle(" CONSOLA DE EJECUCION & AUDITORIA EN VIVO ")
 		}
 	}
 	if u.Footer != nil {
 		u.Footer.SetBackgroundColor(pal.FooterBg)
+		u.Footer.SetTextColor(pal.FooterFg)
 	}
 
 	u.NavList.SetBackgroundColor(pal.NavBg)
@@ -211,19 +254,7 @@ func (u *AppUI) updateFocusVisuals() {
 	}
 
 	navFocused := !hasModal && (currFocus == nil || currFocus == u.NavList)
-	if u.ColorTheme == ThemeTurboC {
-		u.NavList.SetBorderColor(VGABlack)
-		u.NavList.SetTitleColor(VGABlack)
-		if navFocused {
-			u.NavList.SetTitle(fmt.Sprintf("[#000000:#00a800:b] ≡ %s [-:-:-]", navRaw))
-			u.NavList.SetSelectedBackgroundColor(pal.CursorBg)
-			u.NavList.SetSelectedTextColor(pal.CursorFg)
-		} else {
-			u.NavList.SetTitle(fmt.Sprintf("[#000000:#a8a8a8:b] [[#a80000::b]≡[#000000]] %s [-:-:-]", navRaw))
-			u.NavList.SetSelectedBackgroundColor(pal.NavUnfocusedBg)
-			u.NavList.SetSelectedTextColor(pal.NavUnfocusedFg)
-		}
-	} else if navFocused {
+	if navFocused {
 		u.NavList.SetBorderColor(pal.ActiveBorder)
 		u.NavList.SetTitleColor(pal.ActiveTitle)
 		u.NavList.SetTitle(u.decorateTitle(navRaw, true))
@@ -237,8 +268,13 @@ func (u *AppUI) updateFocusVisuals() {
 		u.NavList.SetSelectedTextColor(pal.NavUnfocusedFg)
 	}
 
-	for _, p := range u.viewFocusables[u.ActiveView] {
+	prims := u.viewFocusables[u.ActiveView]
+	for idx, p := range prims {
 		hasFocus := !hasModal && currFocus == p
+		// In Borland Turbo C++ 3.0 (Screenshot 1), the bottom panel in multi-window views uses the Teal/Cyan (#00AFAF)
+		// "Project:" window style with Dark Blue (#0000AF) border and Dark Blue text!
+		isTurboCyanWin := u.ColorTheme == ThemeTurboC && len(prims) > 1 && idx == len(prims)-1
+
 		switch w := p.(type) {
 		case *tview.Table:
 			raw := u.rawTitles[w]
@@ -246,16 +282,39 @@ func (u *AppUI) updateFocusVisuals() {
 				raw = strings.TrimSpace(w.GetTitle())
 				u.rawTitles[w] = raw
 			}
-			w.SetBackgroundColor(pal.PanelBg)
-			w.SetTitle(u.decorateTitle(raw, hasFocus))
+			if isTurboCyanWin {
+				w.SetBackgroundColor(pal.SecondaryBg)
+				w.SetBorderColor(pal.SecondaryBorder)
+				w.SetTitleColor(pal.SecondaryFg)
+				w.SetTitle(fmt.Sprintf("[#0000af:#00afaf:b] [[#ffffff::b]■[#0000af]] %s [-:-:-]", raw))
+				for r := 0; r < w.GetRowCount(); r++ {
+					for c := 0; c < w.GetColumnCount(); c++ {
+						cell := w.GetCell(r, c)
+						if cell == nil {
+							continue
+						}
+						if r == 0 {
+							cell.SetTextColor(VGABlack)
+						} else {
+							cell.SetTextColor(VGABlue)
+						}
+					}
+				}
+			} else {
+				w.SetBackgroundColor(pal.PanelBg)
+				w.SetTitle(u.decorateTitle(raw, hasFocus))
+				if hasFocus {
+					w.SetBorderColor(pal.ActiveBorder)
+					w.SetTitleColor(pal.ActiveTitle)
+				} else {
+					w.SetBorderColor(pal.InactiveBorder)
+					w.SetTitleColor(pal.InactiveTitle)
+				}
+			}
 			if hasFocus {
-				w.SetBorderColor(pal.ActiveBorder)
-				w.SetTitleColor(pal.ActiveTitle)
 				w.SetSelectable(true, false)
 				w.SetSelectedStyle(tcell.StyleDefault.Background(pal.CursorBg).Foreground(pal.CursorFg).Bold(true))
 			} else {
-				w.SetBorderColor(pal.InactiveBorder)
-				w.SetTitleColor(pal.InactiveTitle)
 				w.SetSelectable(false, false)
 			}
 		case *tview.List:
@@ -284,14 +343,23 @@ func (u *AppUI) updateFocusVisuals() {
 				raw = strings.TrimSpace(w.GetTitle())
 				u.rawTitles[w] = raw
 			}
-			w.SetBackgroundColor(pal.PanelBg)
-			w.SetTitle(u.decorateTitle(raw, hasFocus))
-			if hasFocus {
-				w.SetBorderColor(pal.ActiveBorder)
-				w.SetTitleColor(pal.ActiveTitle)
+			if isTurboCyanWin {
+				w.SetBackgroundColor(pal.SecondaryBg)
+				w.SetTextColor(pal.SecondaryFg)
+				w.SetBorderColor(pal.SecondaryBorder)
+				w.SetTitleColor(pal.SecondaryFg)
+				w.SetTitle(fmt.Sprintf("[#0000af:#00afaf:b] [[#ffffff::b]■[#0000af]] %s [-:-:-]", raw))
 			} else {
-				w.SetBorderColor(pal.InactiveBorder)
-				w.SetTitleColor(pal.InactiveTitle)
+				w.SetBackgroundColor(pal.PanelBg)
+				w.SetTextColor(pal.PanelFg)
+				w.SetTitle(u.decorateTitle(raw, hasFocus))
+				if hasFocus {
+					w.SetBorderColor(pal.ActiveBorder)
+					w.SetTitleColor(pal.ActiveTitle)
+				} else {
+					w.SetBorderColor(pal.InactiveBorder)
+					w.SetTitleColor(pal.InactiveTitle)
+				}
 			}
 		}
 	}
@@ -319,39 +387,52 @@ func (u *AppUI) renderLogs() {
 	if u.LogView == nil {
 		return
 	}
+	pal := currentPalette
+	u.LogView.SetBackgroundColor(pal.LogBg)
+	u.LogView.SetTextColor(pal.LogFg)
+
 	var sb strings.Builder
 	for _, entry := range u.logHistory {
 		line := entry
 		switch u.ColorTheme {
 		case ThemeTurboC:
-			// Borland Turbo C bottom Cyan (#00A8A8) Project window uses Dark Blue (#0000A8), Black (#000000), and Red (#A80000)
+			// Borland Turbo C++ 3.0 bottom Cyan (#00AFAF) Project window uses Dark Blue (#0000AF), Black (#000000), and Red (#AF0000)
 			r := strings.NewReplacer(
 				"[yellow::b]", "[#000000::b]",
 				"[yellow]", "[#000000::b]",
-				"[lime::b]", "[#0000a8::b]",
-				"[green]", "[#0000a8::b]",
-				"[aqua]", "[#0000a8::b]",
-				"[red]", "[#a80000::b]",
+				"[lime::b]", "[#0000af::b]",
+				"[green]", "[#0000af::b]",
+				"[aqua]", "[#0000af::b]",
+				"[red]", "[#af0000::b]",
 			)
 			line = r.Replace(line)
-			sb.WriteString(" [#0000a8]• " + line + "[-]\n")
+			sb.WriteString(" [#0000af]• " + line + "[-]\n")
 		case ThemeGreenPhosphor:
 			// IBM 5151 Monochrome P1 Green Phosphor
 			r := strings.NewReplacer(
-				"[yellow::b]", "[#99ff99::b]",
-				"[yellow]", "[#99ff99::b]",
-				"[lime::b]", "[#33ff33::b]",
-				"[green]", "[#33ff33::b]",
-				"[aqua]", "[#33ff33]",
-				"[red]", "[#001000:#33ff33:b]",
+				"[yellow::b]", "[#87ff87::b]",
+				"[yellow]", "[#87ff87::b]",
+				"[lime::b]", "[#00ff5f::b]",
+				"[green]", "[#00ff5f::b]",
+				"[aqua]", "[#00ff5f]",
+				"[red]", "[#001000:#00ff5f:b]",
 			)
 			line = r.Replace(line)
-			sb.WriteString(" [#00a800]>[#33ff33] " + line + "[-]\n")
+			sb.WriteString(" [#00af00]>[#00ff5f] " + line + "[-]\n")
 		case ThemeNorton:
-			// Norton Commander bottom MS-DOS prompt style
-			sb.WriteString(" [#a8a8a8]C:\\>[-] [#55ffff]" + line + "[-]\n")
+			// Norton Commander bottom MS-DOS prompt style (C:\> in Silver #A8A8A8 on Black #000000)
+			r := strings.NewReplacer(
+				"[yellow::b]", "[#ffff5f::b]",
+				"[yellow]", "[#ffff5f]",
+				"[lime::b]", "[#5fffff::b]",
+				"[green]", "[#5fffff]",
+				"[aqua]", "[#5fffff]",
+				"[red]", "[#ff5f5f::b]",
+			)
+			line = r.Replace(line)
+			sb.WriteString(" [#a8a8a8]C:\\> " + line + "[-]\n")
 		default:
-			sb.WriteString(" [#55ffff]" + line + "[-]\n")
+			sb.WriteString(" [#5fffff]" + line + "[-]\n")
 		}
 	}
 	u.LogView.SetText(sb.String())
@@ -398,6 +479,9 @@ func (u *AppUI) populateNavList() {
 	u.rawTitles[u.NavList] = rawTitle
 	u.NavList.SetTitle(rawTitle)
 
+	u.NavList.SetBackgroundColor(currentPalette.NavBg)
+	u.NavList.SetMainTextStyle(tcell.StyleDefault.Background(currentPalette.NavBg).Foreground(currentPalette.NavFg))
+
 	entries := u.navEntries()
 	for _, e := range entries {
 		parts := strings.SplitN(e.short, ". ", 2)
@@ -409,18 +493,18 @@ func (u *AppUI) populateNavList() {
 		var label string
 		switch u.ColorTheme {
 		case ThemeTurboC:
-			// Borland Turbo C++ 3.0: Red (#A80000) shortcut key + Black (#000000) item label
+			// Borland Turbo C++ 3.0 Blue window: White (#FFFFFF) shortcut key + Bright Yellow (#FFFF5F) item label
 			if u.ShowMenuHelp {
-				label = fmt.Sprintf(" [#a80000::b]%-3s[-::-] %-20s │ %s", keyPart, restPart, e.help)
+				label = fmt.Sprintf(" [#ffffff::b]%-3s[-::-] %-20s │ %s", keyPart, restPart, e.help)
 			} else {
-				label = fmt.Sprintf(" [#a80000::b]%-3s[-::-] %s", keyPart, restPart)
+				label = fmt.Sprintf(" [#ffffff::b]%-3s[-::-] %s", keyPart, restPart)
 			}
 		case ThemeNorton:
-			// Norton Commander: Bright Yellow (#FFFF55) shortcut key + Cyan/Black item label
+			// Norton Commander Blue panel: Bright Yellow (#FFFF5F) shortcut key + Bright Cyan (#5FFFFF) item label
 			if u.ShowMenuHelp {
-				label = fmt.Sprintf(" [#ffff55::b]%-3s[-::-] %-20s │ %s", keyPart, restPart, e.help)
+				label = fmt.Sprintf(" [#ffff5f::b]%-3s[-::-] %-20s │ %s", keyPart, restPart, e.help)
 			} else {
-				label = fmt.Sprintf(" [#ffff55::b]%-3s[-::-] %s", keyPart, restPart)
+				label = fmt.Sprintf(" [#ffff5f::b]%-3s[-::-] %s", keyPart, restPart)
 			}
 		default:
 			// Green Phosphor CRT & Dark: Pure uniform text so hardware-style inverse bar inverts 100% of the line
@@ -845,27 +929,31 @@ func (u *AppUI) toggleMenuHelp() {
 }
 
 func (u *AppUI) refreshFooter() {
+	if u.Footer != nil {
+		u.Footer.SetBackgroundColor(currentPalette.FooterBg)
+		u.Footer.SetTextColor(currentPalette.FooterFg)
+	}
 	helpState := "ON"
 	if !u.ShowMenuHelp {
 		helpState = "OFF"
 	}
 	switch u.ColorTheme {
 	case ThemeNorton:
-		// Classic Norton Commander bottom bar: White number on Black + Black label on Teal (#00A8A8)
+		// Classic Norton Commander bottom bar (Screenshot 2): White number on Black + Black label on Teal (#00AFAF)
 		u.Footer.SetText(fmt.Sprintf(
-			"[#ffffff:#000000:b]1[#000000:#00a8a8]Cluster[-:-] [#ffffff:#000000:b]2[#000000:#00a8a8]Users [-:-] [#ffffff:#000000:b]3[#000000:#00a8a8]Tbsp  [-:-] [#ffffff:#000000:b]4[#000000:#00a8a8]Tablas[-:-] [#ffffff:#000000:b]5[#000000:#00a8a8]ASM/Red[-:-] [#ffffff:#000000:b]6[#000000:#00a8a8]RMAN  [-:-] [#ffffff:#000000:b]7[#000000:#00a8a8]Alert [-:-] [#ffffff:#000000:b]8[#000000:#00a8a8]Maint [-:-] [#ffffff:#000000:b]F1[#000000:#00a8a8]Ayuda:%s[-:-] [#ffffff:#000000:b]c[#000000:#00a8a8]Tema[-:-] [#ffffff:#000000:b]b[#000000:#00a8a8]Marco[-:-] [#ffffff:#000000:b]10/q[#000000:#00a8a8]Quit [-:-]",
+			"[#ffffff:#000000:b]1[#000000:#00afaf]Cluster[-:-] [#ffffff:#000000:b]2[#000000:#00afaf]Users [-:-] [#ffffff:#000000:b]3[#000000:#00afaf]Tbsp  [-:-] [#ffffff:#000000:b]4[#000000:#00afaf]Tablas[-:-] [#ffffff:#000000:b]5[#000000:#00afaf]ASM/Red[-:-] [#ffffff:#000000:b]6[#000000:#00afaf]RMAN  [-:-] [#ffffff:#000000:b]7[#000000:#00afaf]Alert [-:-] [#ffffff:#000000:b]8[#000000:#00afaf]Maint [-:-] [#ffffff:#000000:b]F1[#000000:#00afaf]Ayuda:%s[-:-] [#ffffff:#000000:b]c[#000000:#00afaf]Tema[-:-] [#ffffff:#000000:b]b[#000000:#00afaf]Marco[-:-] [#ffffff:#000000:b]10/q[#000000:#00afaf]Quit [-:-]",
 			helpState,
 		))
 	case ThemeTurboC:
-		// Classic Borland Turbo C++ 3.0 bottom bar: Silver (#A8A8A8) background, Red (#A80000) hotkeys, Black (#000000) labels
+		// Classic Borland Turbo C++ 3.0 bottom bar (Screenshot 1): Silver (#A8A8A8) background, Red (#AF0000) hotkeys, Black (#000000) labels
 		u.Footer.SetText(fmt.Sprintf(
-			" [#a80000::b]F1[-::-] [#000000]Help:%s  [#a80000::b]Raton/Hover[-::-] [#000000]Marcar  [#a80000::b]Click/Enter[-::-] [#000000]Submenu  [#a80000::b]c[-::-] [#000000]Tema:%s  [#a80000::b]b[-::-] [#000000]Marcos  [#a80000::b]Alt-X/q[-::-] [#000000]Quit[-]",
+			" [#af0000::b]F1[-::-] [#000000]Help:%s  [#af0000::b]Raton/Hover[-::-] [#000000]Marcar  [#af0000::b]Click/Enter[-::-] [#000000]Submenu  [#af0000::b]c[-::-] [#000000]Tema:%s  [#af0000::b]b[-::-] [#000000]Marcos  [#af0000::b]Alt-X/q[-::-] [#000000]Quit[-]",
 			helpState, u.ColorTheme,
 		))
 	case ThemeGreenPhosphor:
 		// Classic IBM 5151 P1 Green Phosphor inverse key bar
 		u.Footer.SetText(fmt.Sprintf(
-			" [#001000:#33ff33:b] Raton/Hover [-:-:-] [#33ff33]Marcar │ [-][#001000:#33ff33:b] Click/Enter [-:-:-] [#33ff33]Submenu │ [-][#001000:#33ff33:b] F1 [-:-:-] [#33ff33]Ayuda:%s │ [-][#001000:#33ff33:b] c [-:-:-] [#33ff33]Tema:%s │ [-][#001000:#33ff33:b] b [-:-:-] [#33ff33]Marcos │ [-][#001000:#33ff33:b] q [-:-:-] [#33ff33]Salir[-]",
+			" [#001000:#00ff5f:b] Raton/Hover [-:-:-] [#00ff5f]Marcar │ [-][#001000:#00ff5f:b] Click/Enter [-:-:-] [#00ff5f]Submenu │ [-][#001000:#00ff5f:b] F1 [-:-:-] [#00ff5f]Ayuda:%s │ [-][#001000:#00ff5f:b] c [-:-:-] [#00ff5f]Tema:%s │ [-][#001000:#00ff5f:b] b [-:-:-] [#00ff5f]Marcos │ [-][#001000:#00ff5f:b] q [-:-:-] [#00ff5f]Salir[-]",
 			helpState, u.ColorTheme,
 		))
 	default:
@@ -896,6 +984,10 @@ func (u *AppUI) cycleBorderMode() {
 }
 
 func (u *AppUI) refreshHeader() {
+	if u.Header != nil {
+		u.Header.SetBackgroundColor(currentPalette.HeaderBg)
+		u.Header.SetTextColor(currentPalette.HeaderFg)
+	}
 	activeSessions := 0
 	blockers := 0
 	for _, s := range u.State.Sessions {
@@ -911,40 +1003,40 @@ func (u *AppUI) refreshHeader() {
 	var text string
 	switch u.ColorTheme {
 	case ThemeTurboC:
-		// Borland Turbo C++ 3.0 top bar: Silver (#A8A8A8) background with Black (#000000), Dark Blue (#0000A8), Red (#A80000), and Green (#00A800) badge
-		modeBadge := "[#000000:#00a800:b] " + string(u.State.Topology) + " [-:-:-]"
+		// Borland Turbo C++ 3.0 top bar (Screenshot 1): Silver (#A8A8A8) background with Black (#000000), Red (#AF0000) hotkeys, and Green (#00AF00) active highlight
+		modeBadge := "[#000000:#00af00:b] " + string(u.State.Topology) + " [-:-:-]"
 		if u.State.IsMock {
-			modeBadge += " [#ffffff:#a80000:b] MOCK [-:-:-]"
+			modeBadge += " [#ffffff:#af0000:b] MOCK [-:-:-]"
 		}
 		text = fmt.Sprintf(
-			" [#a80000::b]M[-::-][#000000]odo: %s │ [#a80000::b]H[-::-][#000000]ost: [#0000a8::b]%s[-::-] │ [#a80000::b]C[-::-][#000000]luster: [#0000a8::b]%s[-::-] │ [#a80000::b]V[-::-][#000000]er: [#0000a8::b]%s[-::-] │ [#a80000::b]T[-::-][#000000]ema: [#000000:#00a800:b] %s [-:-:-]\n"+
-				" [#000000]HOME: %s (%s) │ [#0000a8::b]%d Inst OPEN[-::-] │ [#0000a8::b]%d PDBs[-::-] │ [#000000::b]%d Sesiones[-::-] ([#a80000::b]%d Locks[-::-]) │ [#a80000::b]%d Inválidos[-::-] │ [#a80000::b]%d Errores ORA-[-::-]",
+			" [#af0000::b]M[-::-][#000000]odo: %s │ [#af0000::b]H[-::-][#000000]ost: [#0000af::b]%s[-::-] │ [#af0000::b]C[-::-][#000000]luster: [#0000af::b]%s[-::-] │ [#af0000::b]V[-::-][#000000]er: [#0000af::b]%s[-::-] │ [#af0000::b]T[-::-][#000000]ema: [#000000:#00af00:b] %s [-:-:-]\n"+
+				" [#000000]HOME: %s (%s) │ [#0000af::b]%d Inst OPEN[-::-] │ [#0000af::b]%d PDBs[-::-] │ [#000000::b]%d Sesiones[-::-] ([#af0000::b]%d Locks[-::-]) │ [#af0000::b]%d Inválidos[-::-] │ [#af0000::b]%d Errores ORA-[-::-]",
 			modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.ColorTheme,
 			u.State.OracleHome, u.State.OracleOwner,
 			len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
 		)
 	case ThemeGreenPhosphor:
 		// IBM 5151 Monochrome P1 Green Phosphor CRT
-		modeBadge := "[#001000:#33ff33:b] " + string(u.State.Topology) + " [-:-:-]"
+		modeBadge := "[#001000:#00ff5f:b] " + string(u.State.Topology) + " [-:-:-]"
 		if u.State.IsMock {
-			modeBadge += " [#001000:#99ff99:b] MOCK [-:-:-]"
+			modeBadge += " [#001000:#87ff87:b] MOCK [-:-:-]"
 		}
 		text = fmt.Sprintf(
-			" [#00a800]Modo:[-] %s │ [#00a800]Host:[-] [#99ff99::b]%s[-::-] │ [#00a800]Cluster:[-] [#33ff33::b]%s[-::-] │ [#00a800]Ver:[-] [#33ff33::b]%s[-::-] │ [#00a800]Tema:[-] [#99ff99::b]%s[-::-]\n"+
-				" [#00a800]HOME:[-] [#33ff33]%s (%s)[-] │ [#99ff99::b]%d Inst OPEN[-::-] │ [#33ff33::b]%d PDBs[-::-] │ [#33ff33::b]%d Sesiones[-::-] ([#001000:#33ff33:b] %d Locks [-:-:-]) │ [#33ff33::b]%d Inválidos[-::-] │ [#001000:#33ff33:b] %d ORA- [-:-:-]",
+			" [#00af00]Modo:[-] %s │ [#00af00]Host:[-] [#87ff87::b]%s[-::-] │ [#00af00]Cluster:[-] [#00ff5f::b]%s[-::-] │ [#00af00]Ver:[-] [#00ff5f::b]%s[-::-] │ [#00af00]Tema:[-] [#87ff87::b]%s[-::-]\n"+
+				" [#00af00]HOME:[-] [#00ff5f]%s (%s)[-] │ [#87ff87::b]%d Inst OPEN[-::-] │ [#00ff5f::b]%d PDBs[-::-] │ [#00ff5f::b]%d Sesiones[-::-] ([#001000:#00ff5f:b] %d Locks [-:-:-]) │ [#00ff5f::b]%d Inválidos[-::-] │ [#001000:#00ff5f:b] %d ORA- [-:-:-]",
 			modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.ColorTheme,
 			u.State.OracleHome, u.State.OracleOwner,
 			len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
 		)
 	default:
-		// Norton Commander & Dark
-		modeBadge := "[#000000:#00a8a8:b] " + string(u.State.Topology) + " [-:-:-]"
+		// Norton Commander (Screenshot 2): Royal Blue (#0000AF) background with Bright Yellow (#FFFF5F) labels and Bright Cyan (#5FFFFF) values
+		modeBadge := "[#000000:#00afaf:b] " + string(u.State.Topology) + " [-:-:-]"
 		if u.State.IsMock {
-			modeBadge += " [#000000:#ffff55:b] MOCK [-:-:-]"
+			modeBadge += " [#000000:#ffff5f:b] MOCK [-:-:-]"
 		}
 		text = fmt.Sprintf(
-			" Modo: %s │ Host: [#ffffff::b]%s[-::-] │ Cluster: [#ffff55::b]%s[-::-] │ Ver: [#55ff55::b]%s[-::-] │ Tema: [#ffff55::b]%s[-::-]\n"+
-				" HOME: %s (%s) │ [#55ff55::b]%d Inst OPEN[-::-] │ [#ffffff::b]%d PDBs[-::-] │ [#ffff55::b]%d Sesiones[-::-] ([#ff5555::b]%d Locks[-::-]) │ [#ff5555::b]%d Inválidos[-::-] │ [#ff5555::b]%d Errores ORA-[-::-]",
+			" [#ffff5f::b]Modo:[-::-] %s │ [#ffff5f::b]Host:[-::-] [#5fffff::b]%s[-::-] │ [#ffff5f::b]Cluster:[-::-] [#5fffff::b]%s[-::-] │ [#ffff5f::b]Ver:[-::-] [#5fffff::b]%s[-::-] │ [#ffff5f::b]Tema:[-::-] [#000000:#00afaf:b] %s [-:-:-]\n"+
+				" [#ffff5f::b]HOME:[-::-] [#5fffff]%s (%s)[-] │ [#5fffff::b]%d Inst OPEN[-::-] │ [#5fffff::b]%d PDBs[-::-] │ [#ffff5f::b]%d Sesiones[-::-] ([#ff5f5f::b]%d Locks[-::-]) │ [#ff5f5f::b]%d Inválidos[-::-] │ [#ff5f5f::b]%d Errores ORA-[-::-]",
 			modeBadge, u.State.HostName, u.State.ClusterName, u.State.ReleaseVersion, u.ColorTheme,
 			u.State.OracleHome, u.State.OracleOwner,
 			len(u.State.Instances), len(u.State.PDBs), activeSessions, blockers, len(u.State.InvalidObjects), critAlerts,
@@ -1249,19 +1341,34 @@ func (u *AppUI) buildSessionsPage() tview.Primitive {
 	ensureSelectableRow(tbl, len(headers), "Sin sesiones de usuario activas")
 
 	sqlPreview := tview.NewTextView().SetDynamicColors(true)
-	sqlPreview.SetBackgroundColor(currentPalette.PanelBg)
-	sqlPreview.SetBorder(true).
-		SetBorderColor(currentPalette.InactiveBorder).
-		SetTitleColor(currentPalette.InactiveTitle).
-		SetTitle(" DETALLE SQL ACTUAL & DIAGNOSTICO DE BLOQUEO ")
+	if u.ColorTheme == ThemeTurboC {
+		sqlPreview.SetBackgroundColor(currentPalette.SecondaryBg)
+		sqlPreview.SetTextColor(currentPalette.SecondaryFg)
+		sqlPreview.SetBorder(true).
+			SetBorderColor(currentPalette.SecondaryBorder).
+			SetTitleColor(currentPalette.SecondaryFg).
+			SetTitle("[#0000af:#00afaf:b] [[#ffffff::b]■[#0000af]] DETALLE SQL ACTUAL & DIAGNOSTICO DE BLOQUEO [-:-:-]")
+	} else {
+		sqlPreview.SetBackgroundColor(currentPalette.PanelBg)
+		sqlPreview.SetTextColor(currentPalette.PanelFg)
+		sqlPreview.SetBorder(true).
+			SetBorderColor(currentPalette.InactiveBorder).
+			SetTitleColor(currentPalette.InactiveTitle).
+			SetTitle(" DETALLE SQL ACTUAL & DIAGNOSTICO DE BLOQUEO ")
+	}
 
 	formatSQLPreview := func(s model.UserSession) string {
-		if u.ColorTheme == ThemeGreenPhosphor {
-			return fmt.Sprintf(" [#00a800]Usuario:[-] [#99ff99::b]%s[-::-] (SID %d,%d @ Inst %d) │ [#00a800]Espera:[-] [#33ff33]%s[-] │ [#00a800]Bloqueo:[-] [#33ff33]%s[-]\n [#00a800]SQL Text:[-] [#99ff99]%s[-]",
+		switch u.ColorTheme {
+		case ThemeGreenPhosphor:
+			return fmt.Sprintf(" [#00af00]Usuario:[-] [#87ff87::b]%s[-::-] (SID %d,%d @ Inst %d) │ [#00af00]Espera:[-] [#00ff5f]%s[-] │ [#00af00]Bloqueo:[-] [#00ff5f]%s[-]\n [#00af00]SQL Text:[-] [#87ff87]%s[-]",
+				s.Username, s.SID, s.Serial, s.InstID, s.WaitEvent, s.BlockingSession, s.SQLText)
+		case ThemeTurboC:
+			return fmt.Sprintf(" [#000000::b]Usuario:[-::-] [#0000af::b]%s[-::-] (SID %d,%d @ Inst %d) │ [#000000::b]Espera:[-::-] [#0000af]%s[-] │ [#000000::b]Bloqueo:[-::-] [#af0000::b]%s[-::-]\n [#000000::b]SQL Text:[-::-] [#0000af::b]%s[-::-]",
+				s.Username, s.SID, s.Serial, s.InstID, s.WaitEvent, s.BlockingSession, s.SQLText)
+		default:
+			return fmt.Sprintf(" [#ffff5f::b]Usuario:[-::-] [#5fffff]%s (SID %d,%d @ Inst %d)[-] │ [#ffff5f::b]Espera:[-::-] [#5fffff]%s[-] │ [#ffff5f::b]Bloqueo:[-::-] [#5fffff]%s[-]\n [#ffff5f::b]SQL Text:[-::-] [#5fffff]%s[-]",
 				s.Username, s.SID, s.Serial, s.InstID, s.WaitEvent, s.BlockingSession, s.SQLText)
 		}
-		return fmt.Sprintf(" [#ffff55::b]Usuario:[-::-] %s (SID %d,%d @ Inst %d) │ [#ffff55::b]Espera:[-::-] %s │ [#ffff55::b]Bloqueo:[-::-] %s\n [#ffff55::b]SQL Text:[-::-] [#ffffff]%s[-]",
-			s.Username, s.SID, s.Serial, s.InstID, s.WaitEvent, s.BlockingSession, s.SQLText)
 	}
 
 	if len(u.State.Sessions) > 0 {
@@ -2034,6 +2141,13 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 	tailBox := tview.NewTextView().
 		SetDynamicColors(true).
 		SetScrollable(true)
+	if u.ColorTheme == ThemeTurboC {
+		tailBox.SetBackgroundColor(currentPalette.SecondaryBg)
+		tailBox.SetTextColor(currentPalette.SecondaryFg)
+	} else {
+		tailBox.SetBackgroundColor(currentPalette.PanelBg)
+		tailBox.SetTextColor(currentPalette.PanelFg)
+	}
 	tailBox.SetBorder(true).SetTitle(u.winTitle("[3/3] TAIL EN VIVO DE ALERT_"+instSID+".LOG (Ultimas Lineas del Motor)", "←/→ Ventana"))
 
 	if len(u.State.AlertTailLines) == 0 {
@@ -2041,21 +2155,30 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 	} else {
 		var sb strings.Builder
 		for _, line := range u.State.AlertTailLines {
-			if u.ColorTheme == ThemeGreenPhosphor {
+			switch u.ColorTheme {
+			case ThemeGreenPhosphor:
 				if strings.Contains(line, "ORA-") {
-					sb.WriteString(" [#001000:#33ff33:b] " + line + " [-:-:-]\n")
+					sb.WriteString(" [#001000:#00ff5f:b] " + line + " [-:-:-]\n")
 				} else if strings.Contains(line, "Thread ") || strings.Contains(line, "ALTER ") || strings.Contains(line, "Completed") {
-					sb.WriteString(" [#99ff99::b]" + line + "[-::-]\n")
+					sb.WriteString(" [#87ff87::b]" + line + "[-::-]\n")
 				} else {
-					sb.WriteString(" [#33ff33]" + line + "[-]\n")
+					sb.WriteString(" [#00ff5f]" + line + "[-]\n")
 				}
-			} else {
+			case ThemeTurboC:
 				if strings.Contains(line, "ORA-") {
-					sb.WriteString(" [#ff5555::b]" + line + "[-::-]\n")
+					sb.WriteString(" [#af0000::b]" + line + "[-::-]\n")
 				} else if strings.Contains(line, "Thread ") || strings.Contains(line, "ALTER ") || strings.Contains(line, "Completed") {
-					sb.WriteString(" [#55ff55]" + line + "[-]\n")
+					sb.WriteString(" [#000000::b]" + line + "[-::-]\n")
 				} else {
-					sb.WriteString(" [#ffffff]" + line + "[-]\n")
+					sb.WriteString(" [#0000af]" + line + "[-]\n")
+				}
+			default:
+				if strings.Contains(line, "ORA-") {
+					sb.WriteString(" [#ff5f5f::b]" + line + "[-::-]\n")
+				} else if strings.Contains(line, "Thread ") || strings.Contains(line, "ALTER ") || strings.Contains(line, "Completed") {
+					sb.WriteString(" [#ffff5f]" + line + "[-]\n")
+				} else {
+					sb.WriteString(" [#5fffff]" + line + "[-]\n")
 				}
 			}
 		}
@@ -2226,9 +2349,11 @@ func (u *AppUI) showGlobalMaintenancePopup() {
 }
 
 // showActionMenuModal displays a popup dialog box styled for the active theme:
-// - Norton Commander: Silver (#A8A8A8) dialog with 1-char outer rim, Double Bright White border, White text, and Bright Yellow (#FFFF55) cursor bar.
-// - Borland Turbo C++ 3.0: Silver (#A8A8A8) dropdown with 1-char outer rim, Single Black border, Red (#A80000) hotkeys, Black text, and Green (#00A800) cursor bar.
-// - Green Phosphor CRT: Dark green (#002A00) dialog with Double Bright Phosphor border and inverse #33FF33 cursor bar.
+// - Norton Commander (Screenshot 2): Silver (#A8A8A8) dialog with 1-char outer rim, Double Bright White (#FFFFFF) border,
+//   solid White title badge with Black text, Bright White text with Yellow [1]..[N] keys, Bright Yellow (#FFFF5F) cursor bar with Black text, and a solid Black (#000000) drop shadow.
+// - Borland Turbo C++ 3.0 (Screenshot 1): Silver (#A8A8A8) dropdown with 1-char outer rim, Single Black (#000000) border,
+//   Red (#AF0000) hotkeys, Black text, Green (#00AF00) cursor bar with Black text, and a solid Black (#000000) drop shadow.
+// - Green Phosphor CRT: Dark green (#002A00) dialog with Double Bright Phosphor border and inverse #00FF5F cursor bar.
 func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 	pal := currentPalette
 	list := tview.NewList().
@@ -2245,9 +2370,9 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 	case ThemeTurboC:
 		modalTitle = fmt.Sprintf("[#000000:#a8a8a8:b] %s [-:-:-]", cleanTitle)
 	case ThemeNorton:
-		modalTitle = fmt.Sprintf("[#ffffff:#a8a8a8:b] %s [-:-:-]", cleanTitle)
+		modalTitle = fmt.Sprintf("[#000000:#ffffff:b] %s [-:-:-]", cleanTitle)
 	case ThemeGreenPhosphor:
-		modalTitle = fmt.Sprintf("[#001000:#33ff33:b] %s [-:-:-]", cleanTitle)
+		modalTitle = fmt.Sprintf("[#001000:#00ff5f:b] %s [-:-:-]", cleanTitle)
 	}
 
 	list.SetBorder(true).
@@ -2261,13 +2386,20 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 		fn := act.handler
 		actTitle := act.title
 		var line string
-		if u.ColorTheme == ThemeTurboC {
+		switch u.ColorTheme {
+		case ThemeTurboC:
 			if u.ShowMenuHelp && act.subtitle != "" {
-				line = fmt.Sprintf(" ▸ [#a80000::b][%d][-::-] %-52s │ %s", i+1, actTitle, act.subtitle)
+				line = fmt.Sprintf(" ▸ [#af0000::b][%d][-::-] %-52s │ %s", i+1, actTitle, act.subtitle)
 			} else {
-				line = fmt.Sprintf(" ▸ [#a80000::b][%d][-::-] %s", i+1, actTitle)
+				line = fmt.Sprintf(" ▸ [#af0000::b][%d][-::-] %s", i+1, actTitle)
 			}
-		} else {
+		case ThemeNorton:
+			if u.ShowMenuHelp && act.subtitle != "" {
+				line = fmt.Sprintf(" ▸ [#ffff5f::b][%d][-::-] %-52s │ %s", i+1, actTitle, act.subtitle)
+			} else {
+				line = fmt.Sprintf(" ▸ [#ffff5f::b][%d][-::-] %s", i+1, actTitle)
+			}
+		default:
 			if u.ShowMenuHelp && act.subtitle != "" {
 				line = fmt.Sprintf(" ▸ [%d] %-52s │ %s", i+1, actTitle, act.subtitle)
 			} else {
@@ -2286,9 +2418,13 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 	}
 	f1Line := " ▸ [F1] Mostrar / Ocultar Ayuda en este Menu"
 	escLine := " ▸ [Esc / Clic Derecho] Cancelar / Cerrar Ventana"
-	if u.ColorTheme == ThemeTurboC {
-		f1Line = " ▸ [#a80000::b][F1][-::-] Mostrar / Ocultar Ayuda en este Menu"
-		escLine = " ▸ [#a80000::b][Esc / Clic Derecho][-::-] Cancelar / Cerrar Ventana"
+	switch u.ColorTheme {
+	case ThemeTurboC:
+		f1Line = " ▸ [#af0000::b][F1][-::-] Mostrar / Ocultar Ayuda en este Menu"
+		escLine = " ▸ [#af0000::b][Esc / Clic Derecho][-::-] Cancelar / Cerrar Ventana"
+	case ThemeNorton:
+		f1Line = " ▸ [#ffff5f::b][F1][-::-] Mostrar / Ocultar Ayuda en este Menu"
+		escLine = " ▸ [#ffff5f::b][Esc / Clic Derecho][-::-] Cancelar / Cerrar Ventana"
 	}
 	list.AddItem(f1Line, "", 0, func() {
 		u.Pages.RemovePage("modal")
@@ -2311,20 +2447,28 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 		maxWidth = 114
 	}
 
-	// 1-character outer dialog rim on left and right, matching Norton Commander & Borland Turbo C++ dialog boxes
+	// 1-character outer dialog rim + classic MS-DOS solid Black drop shadow on right and bottom
 	leftRim := tview.NewBox().SetBackgroundColor(pal.ModalBg)
 	rightRim := tview.NewBox().SetBackgroundColor(pal.ModalBg)
+	rightShadow := tview.NewBox().SetBackgroundColor(VGABlack)
+	bottomShadow := tview.NewBox().SetBackgroundColor(VGABlack)
+
 	framedModal := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(leftRim, 1, 0, false).
 		AddItem(list, 0, 1, true).
-		AddItem(rightRim, 1, 0, false)
+		AddItem(rightRim, 1, 0, false).
+		AddItem(rightShadow, 2, 0, false)
+
+	shadowedModal := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(framedModal, modalHeight, 1, true).
+		AddItem(bottomShadow, 1, 0, false)
 
 	modalFlex := tview.NewFlex().
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
-			AddItem(framedModal, modalHeight, 1, true).
-			AddItem(nil, 0, 1, false), maxWidth+2, 1, true).
+			AddItem(shadowedModal, modalHeight+1, 1, true).
+			AddItem(nil, 0, 1, false), maxWidth+4, 1, true).
 		AddItem(nil, 0, 1, false)
 
 	u.Pages.AddPage("modal", modalFlex, true, true)
@@ -2372,17 +2516,25 @@ func (u *AppUI) showConfirmModal(taskName string, onConfirm func()) {
 
 	leftRim := tview.NewBox().SetBackgroundColor(pal.ConfirmBg)
 	rightRim := tview.NewBox().SetBackgroundColor(pal.ConfirmBg)
+	rightShadow := tview.NewBox().SetBackgroundColor(VGABlack)
+	bottomShadow := tview.NewBox().SetBackgroundColor(VGABlack)
+
 	framedConfirm := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(leftRim, 1, 0, false).
 		AddItem(list, 0, 1, true).
-		AddItem(rightRim, 1, 0, false)
+		AddItem(rightRim, 1, 0, false).
+		AddItem(rightShadow, 2, 0, false)
+
+	shadowedConfirm := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(framedConfirm, 4, 1, true).
+		AddItem(bottomShadow, 1, 0, false)
 
 	modalFlex := tview.NewFlex().
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
-			AddItem(framedConfirm, 4, 1, true).
-			AddItem(nil, 0, 1, false), maxWidth+2, 1, true).
+			AddItem(shadowedConfirm, 5, 1, true).
+			AddItem(nil, 0, 1, false), maxWidth+4, 1, true).
 		AddItem(nil, 0, 1, false)
 
 	u.Pages.AddPage("modal", modalFlex, true, true)

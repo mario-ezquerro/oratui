@@ -12,28 +12,29 @@ import (
 var currentBorderStyle = model.BorderMixedUnicode
 
 var (
-	// Authentic MS-DOS VGA 16-color palette (Norton Commander & Borland Turbo C++ 3.0)
-	VGABlack        = tcell.NewRGBColor(0, 0, 0)       // #000000
-	VGABlue         = tcell.NewRGBColor(0, 0, 168)     // #0000A8 (NC & Turbo C panel blue)
-	VGAGreen        = tcell.NewRGBColor(0, 168, 0)     // #00A800 (Turbo C menu selection green)
-	VGACyan         = tcell.NewRGBColor(0, 168, 168)   // #00A8A8 (NC cursor bar & Turbo C bottom window cyan)
-	VGARed          = tcell.NewRGBColor(168, 0, 0)     // #A80000 (Turbo C red hotkey letters)
-	VGASilver       = tcell.NewRGBColor(168, 168, 168) // #A8A8A8 (NC dialog box & Turbo C menu gray)
-	VGADarkGray     = tcell.NewRGBColor(85, 85, 85)    // #555555
-	VGABrightBlue   = tcell.NewRGBColor(85, 85, 255)   // #5555FF
-	VGABrightGreen  = tcell.NewRGBColor(85, 255, 85)   // #55FF55
-	VGABrightCyan   = tcell.NewRGBColor(85, 255, 255)  // #55FFFF (NC panel borders & file text)
-	VGABrightRed    = tcell.NewRGBColor(255, 85, 85)   // #FF5555
-	VGABrightYellow = tcell.NewRGBColor(255, 255, 85)  // #FFFF55 (NC column headers & dialog highlight bar)
-	VGABrightWhite  = tcell.NewRGBColor(255, 255, 255) // #FFFFFF (NC dialog borders & Turbo C active frame)
+	// Authentic MS-DOS VGA 16-color palette aligned to both 24-bit TrueColor AND XTerm 256-color cubes
+	// so colors render identically on local terminals and over SSH (xterm-256color):
+	VGABlack        = tcell.NewRGBColor(0, 0, 0)       // #000000 (XTerm 16)
+	VGABlue         = tcell.NewRGBColor(0, 0, 175)     // #0000AF (XTerm 19 - Norton Commander & Borland Turbo C++ Royal Blue)
+	VGAGreen        = tcell.NewRGBColor(0, 175, 0)     // #00AF00 (XTerm 34 - Borland Turbo C++ selection bar green)
+	VGACyan         = tcell.NewRGBColor(0, 175, 175)   // #00AFAF (XTerm 37 - Norton Commander cursor bar & Turbo C++ bottom Project window)
+	VGARed          = tcell.NewRGBColor(175, 0, 0)     // #AF0000 (XTerm 124 - Borland Turbo C++ red shortcut letters)
+	VGASilver       = tcell.NewRGBColor(168, 168, 168) // #A8A8A8 (XTerm 248 - Norton Commander dialog box & Turbo C++ menu bar gray)
+	VGADarkGray     = tcell.NewRGBColor(95, 95, 95)    // #5F5F5F (XTerm 59)
+	VGABrightBlue   = tcell.NewRGBColor(95, 95, 255)   // #5F5FFF (XTerm 63)
+	VGABrightGreen  = tcell.NewRGBColor(95, 255, 95)   // #5FFF5F (XTerm 83 - Turbo C++ [■] and [↑] window icons)
+	VGABrightCyan   = tcell.NewRGBColor(95, 255, 255)  // #5FFFFF (XTerm 87 - Norton Commander double borders & file list text)
+	VGABrightRed    = tcell.NewRGBColor(255, 95, 95)   // #FF5F5F (XTerm 203)
+	VGABrightYellow = tcell.NewRGBColor(255, 255, 95)  // #FFFF5F (XTerm 227 - Norton Commander column headers & Turbo C++ window text)
+	VGABrightWhite  = tcell.NewRGBColor(255, 255, 255) // #FFFFFF (XTerm 231 - Norton Commander dialog borders & Turbo C++ double frame)
 
 	// Authentic IBM 5151 / VT100 P1 Green Phosphor CRT palette
-	PhosphorBg      = tcell.NewRGBColor(0, 16, 0)     // #001000 Deep CRT screen black-green
-	PhosphorPanelBg = tcell.NewRGBColor(0, 24, 0)     // #001800 Subtle CRT scanline dark green
-	PhosphorModalBg = tcell.NewRGBColor(0, 42, 0)     // #002A00 Dialog box dark green
-	PhosphorDim     = tcell.NewRGBColor(0, 168, 0)    // #00A800 Normal phosphor green
-	PhosphorBright  = tcell.NewRGBColor(51, 255, 51)  // #33FF33 High-intensity phosphor green
-	PhosphorGlow    = tcell.NewRGBColor(153, 255, 153)// #99FF99 Peak phosphor bloom
+	PhosphorBg      = tcell.NewRGBColor(0, 16, 0)      // #001000 Deep CRT screen black-green
+	PhosphorPanelBg = tcell.NewRGBColor(0, 24, 0)      // #001800 Subtle CRT scanline dark green
+	PhosphorModalBg = tcell.NewRGBColor(0, 42, 0)      // #002A00 Dialog box dark green
+	PhosphorDim     = tcell.NewRGBColor(0, 175, 0)     // #00AF00 Normal phosphor green (XTerm 34)
+	PhosphorBright  = tcell.NewRGBColor(0, 255, 95)    // #00FF5F High-intensity phosphor green (XTerm 47)
+	PhosphorGlow    = tcell.NewRGBColor(135, 255, 135) // #87FF87 Peak phosphor bloom (XTerm 120)
 )
 
 type ColorThemeName string
@@ -87,41 +88,46 @@ var currentPalette = GetColorPalette(ThemeNorton)
 func GetColorPalette(theme ColorThemeName) ColorPalette {
 	switch theme {
 	case ThemeTurboC:
-		// Exact Borland Turbo C++ 3.0 MS-DOS colors (from screenshot 1)
+		// Exact Borland Turbo C++ 3.0 MS-DOS colors (from Screenshot 1):
+		// - Top menu bar & bottom status bar: Silver (#A8A8A8) with Black (#000000) text and Red (#AF0000) shortcut letters.
+		// - Left & main windows: Royal Blue (#0000AF) with Double Bright White (#FFFFFF) borders, Green [■]/[↑] icons,
+		//   Bright Yellow (#FFFF5F) text, and Green (#00AF00) selection bar with Black (#000000) text.
+		// - Bottom "Project:" window & secondary bottom panel: Teal/Cyan (#00AFAF) background with Single Dark Blue (#0000AF) border and Dark Blue text.
+		// - Floating dropdown menus: Silver (#A8A8A8) with Single Black (#000000) border, Black text, Red (#AF0000) hotkeys, Green (#00AF00) selection bar, and Black drop shadow.
 		return ColorPalette{
 			Name:            ThemeTurboC,
-			PanelBg:         VGABlue,         // #0000A8 Royal Blue editor background
-			PanelFg:         VGABrightYellow, // #FFFF55 Bright Yellow text on blue
-			SecondaryBg:     VGACyan,         // #00A8A8 Teal/Cyan bottom Project window
-			SecondaryFg:     VGABlue,         // #0000A8 Dark Blue text on Cyan window
-			SecondaryBorder: VGABlue,         // #0000A8 Dark Blue single border on Cyan window
-			NavBg:           VGASilver,       // #A8A8A8 Classic Borland Silver/Gray menu
-			NavFg:           VGABlack,        // #000000 Black menu text
-			NavUnfocusedBg:  VGAGreen,        // #00A800 Green active module bar
+			PanelBg:         VGABlue,         // #0000AF Royal Blue window background
+			PanelFg:         VGABrightYellow, // #FFFF5F Bright Yellow text inside blue windows
+			SecondaryBg:     VGACyan,         // #00AFAF Teal/Cyan bottom Project window background
+			SecondaryFg:     VGABlue,         // #0000AF Dark Blue text on Cyan window
+			SecondaryBorder: VGABlue,         // #0000AF Dark Blue single border on Cyan window
+			NavBg:           VGABlue,         // #0000AF Royal Blue left window (like Turbo C editor window)
+			NavFg:           VGABrightYellow, // #FFFF5F Bright Yellow text
+			NavUnfocusedBg:  VGAGreen,        // #00AF00 Green active module bar
 			NavUnfocusedFg:  VGABlack,        // #000000 Black text on Green bar
-			HeaderBg:        VGASilver,       // #A8A8A8 Silver top menu bar
+			HeaderBg:        VGASilver,       // #A8A8A8 Silver top menu bar (≡ File Edit Search Run...)
 			HeaderFg:        VGABlack,        // #000000 Black text on top menu bar
 			FooterBg:        VGASilver,       // #A8A8A8 Silver bottom F1 Help bar
 			FooterFg:        VGABlack,        // #000000 Black text on bottom bar
-			LogBg:           VGACyan,         // #00A8A8 Bottom "Project:" Cyan panel
-			LogFg:           VGABlue,         // #0000A8 Dark Blue text inside Cyan panel
-			LogBorder:       VGABlue,         // #0000A8 Dark Blue border inside Cyan panel
-			ActiveBorder:    VGABrightWhite,  // #FFFFFF Double White border on focused Blue window
-			ActiveTitle:     VGABrightWhite,  // #FFFFFF White title with [#55FF55][■] and [↑]
-			InactiveBorder:  VGABrightCyan,   // #55FFFF Cyan border on unfocused Blue window
-			InactiveTitle:   VGABrightCyan,
-			CursorBg:        VGAGreen,        // #00A800 Classic Turbo C Green selection bar
+			LogBg:           VGACyan,         // #00AFAF Bottom "Project:" Cyan panel
+			LogFg:           VGABlue,         // #0000AF Dark Blue text inside Cyan panel
+			LogBorder:       VGABlue,         // #0000AF Single Dark Blue border on Cyan panel
+			ActiveBorder:    VGABrightWhite,  // #FFFFFF Double White border on Blue windows
+			ActiveTitle:     VGABrightWhite,  // #FFFFFF White title with [#5fff5f][■] and [↑]
+			InactiveBorder:  VGABrightWhite,  // #FFFFFF Double White border on Blue windows
+			InactiveTitle:   VGABrightWhite,
+			CursorBg:        VGAGreen,        // #00AF00 Classic Turbo C Green selection bar
 			CursorFg:        VGABlack,        // #000000 Black text on Green selection bar
 			ModalBg:         VGASilver,       // #A8A8A8 Classic Borland Silver dropdown box
 			ModalFg:         VGABlack,        // #000000 Black text in dropdown
 			ModalBorder:     VGABlack,        // #000000 Single Black border inside Silver rim
 			ModalTitle:      VGABlack,        // #000000 Title in Black on Silver
-			ModalCursorBg:   VGAGreen,        // #00A800 Classic Turbo C Green hover bar
+			ModalCursorBg:   VGAGreen,        // #00AF00 Classic Turbo C Green hover bar
 			ModalCursorFg:   VGABlack,        // #000000 Black text on Green hover bar
-			ConfirmBg:       VGARed,          // #A80000 Borland Red alert box
+			ConfirmBg:       VGARed,          // #AF0000 Borland Red alert box
 			ConfirmFg:       VGABrightWhite,
 			ConfirmBorder:   VGABrightYellow,
-			ConfirmCursorBg: VGABrightYellow, // #FFFF55 Yellow selection bar
+			ConfirmCursorBg: VGABrightYellow, // #FFFF5F Yellow selection bar
 			ConfirmCursorFg: VGABlack,
 		}
 	case ThemeGreenPhosphor:
@@ -200,42 +206,48 @@ func GetColorPalette(theme ColorThemeName) ColorPalette {
 			ConfirmCursorFg: VGABlack,
 		}
 	default:
-		// Exact Norton Commander MS-DOS colors (from screenshot 2: Blue #0000A8 panels, Bright Cyan #55FFFF borders & files,
-		// Yellow #FFFF55 column headers, Teal #00A8A8 cursor bar with Black text, and Silver #A8A8A8 dialog boxes with White double frame & Yellow cursor bar!)
+		// Exact Norton Commander MS-DOS colors (from Screenshot 2):
+		// - All panels: Royal Blue (#0000AF) background with Double Bright Cyan (#5FFFFF) borders.
+		// - Column headers: Bright Yellow (#FFFF5F).
+		// - Data rows: Uniform Bright Cyan (#5FFFFF) text on Royal Blue (#0000AF).
+		// - Active panel title & cursor bar: Teal/Cyan (#00AFAF) background with Black (#000000) text.
+		// - Popup dialog box ("Drive Letter"): Silver (#A8A8A8) with 1-char outer rim, Double Bright White (#FFFFFF) border,
+		//   solid Bright White title badge with dark text, Bright White item text, Bright Yellow (#FFFF5F) selection bar with Black text, and Black drop shadow.
+		// - Bottom DOS console & 1Help..10Quit bar: Black (#000000) background with Silver C:\> prompt and Teal (#00AFAF) key blocks.
 		return ColorPalette{
 			Name:            ThemeNorton,
-			PanelBg:         VGABlue,         // #0000A8 Norton Commander panel blue
-			PanelFg:         VGABrightCyan,   // #55FFFF Bright Cyan text inside blue panels
-			SecondaryBg:     VGABlue,         // #0000A8 Blue secondary panels
-			SecondaryFg:     VGABrightCyan,   // #55FFFF Bright Cyan text
-			SecondaryBorder: VGABrightCyan,   // #55FFFF Bright Cyan border
-			NavBg:           VGABlue,         // #0000A8 Blue left panel
-			NavFg:           VGABrightCyan,   // #55FFFF Bright Cyan items
-			NavUnfocusedBg:  VGACyan,         // #00A8A8 Teal bar on active module
+			PanelBg:         VGABlue,         // #0000AF Norton Commander Royal Blue
+			PanelFg:         VGABrightCyan,   // #5FFFFF Bright Cyan text inside blue panels
+			SecondaryBg:     VGABlue,         // #0000AF Royal Blue secondary panels
+			SecondaryFg:     VGABrightCyan,   // #5FFFFF Bright Cyan text
+			SecondaryBorder: VGABrightCyan,   // #5FFFFF Double Bright Cyan border
+			NavBg:           VGABlue,         // #0000AF Royal Blue left panel
+			NavFg:           VGABrightCyan,   // #5FFFFF Bright Cyan items
+			NavUnfocusedBg:  VGACyan,         // #00AFAF Teal bar on active module
 			NavUnfocusedFg:  VGABlack,        // #000000 Black text on Teal bar
-			HeaderBg:        VGABlue,         // #0000A8 Classic Norton Commander Blue top box with Teal title badge
-			HeaderFg:        VGABrightCyan,   // #55FFFF
+			HeaderBg:        VGABlue,         // #0000AF Classic Norton Commander Blue top bar
+			HeaderFg:        VGABrightCyan,   // #5FFFFF
 			FooterBg:        VGABlack,        // #000000 Bottom 1Help 2Menu bar background
 			FooterFg:        VGABrightWhite,  // #FFFFFF
 			LogBg:           VGABlack,        // #000000 MS-DOS C:\> output console at bottom
 			LogFg:           VGASilver,       // #A8A8A8 MS-DOS console text
-			LogBorder:       VGABrightCyan,   // #55FFFF
-			ActiveBorder:    VGABrightCyan,   // #55FFFF Bright Cyan double border (with Teal title badge!)
-			ActiveTitle:     VGABrightYellow, // #FFFF55
-			InactiveBorder:  VGABrightCyan,   // #55FFFF Bright Cyan border on all panels
-			InactiveTitle:   VGABrightCyan,   // #55FFFF
-			CursorBg:        VGACyan,         // #00A8A8 Classic Norton Commander Teal cursor bar (config sys)
+			LogBorder:       VGABrightCyan,   // #5FFFFF
+			ActiveBorder:    VGABrightCyan,   // #5FFFFF Double Bright Cyan border (with Teal title badge)
+			ActiveTitle:     VGABrightYellow, // #FFFF5F
+			InactiveBorder:  VGABrightCyan,   // #5FFFFF Double Bright Cyan border on all panels
+			InactiveTitle:   VGABrightCyan,   // #5FFFFF
+			CursorBg:        VGACyan,         // #00AFAF Classic Norton Commander Teal cursor bar
 			CursorFg:        VGABlack,        // #000000 Black text on Teal cursor bar
 			ModalBg:         VGASilver,       // #A8A8A8 Classic Norton Commander gray dialog box (Drive Letter)
 			ModalFg:         VGABrightWhite,  // #FFFFFF Bright White text inside gray dialog box
 			ModalBorder:     VGABrightWhite,  // #FFFFFF Double White border on gray dialog box
 			ModalTitle:      VGABlack,        // #000000 Title on White badge
-			ModalCursorBg:   VGABrightYellow, // #FFFF55 Bright Yellow selection bar inside dialog (button 'A')
+			ModalCursorBg:   VGABrightYellow, // #FFFF5F Bright Yellow selection bar inside dialog (button 'A')
 			ModalCursorFg:   VGABlack,        // #000000 Bold Black text on Yellow bar
-			ConfirmBg:       VGARed,          // #A80000 Classic Norton Commander Red warning dialog
+			ConfirmBg:       VGARed,          // #AF0000 Classic Norton Commander Red warning dialog
 			ConfirmFg:       VGABrightWhite,  // #FFFFFF
 			ConfirmBorder:   VGABrightWhite,  // #FFFFFF
-			ConfirmCursorBg: VGABrightYellow, // #FFFF55 Yellow selection bar
+			ConfirmCursorBg: VGABrightYellow, // #FFFF5F Yellow selection bar
 			ConfirmCursorFg: VGABlack,        // #000000
 		}
 	}
@@ -265,10 +277,16 @@ func NextColorTheme(curr ColorThemeName) ColorThemeName {
 	}
 }
 
-// HeaderCell creates a non-selectable table column header cell styled for the active theme.
+// HeaderCell creates a non-selectable table column header cell styled for the active theme:
+// - Norton Commander: Bright Yellow (#FFFF5F) like "C:↓ Name   Name   Name" in Screenshot 2.
+// - Borland Turbo C++: Bright White (#FFFFFF) on Blue panels.
+// - Green Phosphor: Peak Phosphor Glow (#87FF87).
 func HeaderCell(text string) *tview.TableCell {
 	col := VGABrightYellow
-	if currentPalette.Name == ThemeGreenPhosphor {
+	switch currentPalette.Name {
+	case ThemeTurboC:
+		col = VGABrightWhite
+	case ThemeGreenPhosphor:
 		col = PhosphorGlow
 	}
 	return tview.NewTableCell(text).
@@ -277,11 +295,21 @@ func HeaderCell(text string) *tview.TableCell {
 		SetSelectable(false)
 }
 
-// KeyCell creates a bold primary-key table cell that cleanly inverts to CursorFg when selected.
+// KeyCell creates a primary-key table cell that matches the authentic uniform row color of each theme:
+// - Norton Commander: Bright Cyan (#5FFFFF) like "ADINF", "DOS", "GAMES" in Screenshot 2.
+// - Borland Turbo C++: Bright Yellow (#FFFF5F) like the yellow code in Screenshot 1.
+// - Green Phosphor: Peak Phosphor Glow (#87FF87).
 func KeyCell(text string) *tview.TableCell {
-	col := VGABrightWhite
-	if currentPalette.Name == ThemeGreenPhosphor {
+	col := currentPalette.PanelFg
+	switch currentPalette.Name {
+	case ThemeNorton:
+		col = VGABrightCyan
+	case ThemeTurboC:
+		col = VGABrightYellow
+	case ThemeGreenPhosphor:
 		col = PhosphorGlow
+	case ThemeDark:
+		col = VGABrightWhite
 	}
 	return tview.NewTableCell(text).
 		SetTextColor(col).
@@ -290,9 +318,16 @@ func KeyCell(text string) *tview.TableCell {
 
 // AccentCell creates an accent table cell that cleanly inverts to CursorFg when selected.
 func AccentCell(text string) *tview.TableCell {
-	col := VGABrightCyan
-	if currentPalette.Name == ThemeGreenPhosphor {
+	col := currentPalette.PanelFg
+	switch currentPalette.Name {
+	case ThemeNorton:
+		col = VGABrightCyan
+	case ThemeTurboC:
+		col = VGABrightYellow
+	case ThemeGreenPhosphor:
 		col = PhosphorBright
+	default:
+		col = VGABrightCyan
 	}
 	return tview.NewTableCell(text).SetTextColor(col)
 }
@@ -300,13 +335,19 @@ func AccentCell(text string) *tview.TableCell {
 // MutedCell creates a muted/placeholder table cell that cleanly inverts to CursorFg when selected.
 func MutedCell(text string) *tview.TableCell {
 	col := VGASilver
-	if currentPalette.Name == ThemeGreenPhosphor {
+	switch currentPalette.Name {
+	case ThemeNorton:
+		col = VGABrightCyan
+	case ThemeTurboC:
+		col = VGABrightYellow
+	case ThemeGreenPhosphor:
 		col = PhosphorDim
 	}
 	return tview.NewTableCell(text).SetTextColor(col).SetSelectable(true)
 }
 
-// StatusCell creates a status table cell using tview cell color attributes so it cleanly inverts to CursorFg when selected.
+// StatusCell creates a status table cell that keeps Norton Commander (Bright Cyan) and Turbo C++ (Bright Yellow)
+// panels clean and authentic, while highlighting warnings/errors in Yellow/Red.
 func StatusCell(status string) *tview.TableCell {
 	u := strings.ToUpper(status)
 	if currentPalette.Name == ThemeGreenPhosphor {
@@ -327,7 +368,7 @@ func StatusCell(status string) *tview.TableCell {
 			strings.Contains(u, "WARNING") || strings.Contains(u, "RUNNING"):
 			return tview.NewTableCell(status).SetTextColor(PhosphorDim)
 		default:
-			return tview.NewTableCell(status).SetTextColor(PhosphorGlow).SetAttributes(tcell.AttrBold)
+			return tview.NewTableCell(status).SetTextColor(PhosphorBright).SetAttributes(tcell.AttrBold)
 		}
 	}
 
@@ -344,42 +385,40 @@ func StatusCell(status string) *tview.TableCell {
 		strings.Contains(u, "STALE") || strings.Contains(u, "MED") ||
 		strings.Contains(u, "WARNING") || strings.Contains(u, "RUNNING"):
 		return tview.NewTableCell(status).SetTextColor(VGABrightYellow).SetAttributes(tcell.AttrBold)
-	case strings.Contains(u, "ONLINE") || strings.Contains(u, "OPEN") ||
-		strings.Contains(u, "READ WRITE") || strings.Contains(u, "CONNECTED") ||
-		strings.Contains(u, "COMPLETED") || strings.Contains(u, "READY") ||
-		strings.Contains(u, "APPLYING_LOG") ||
-		(strings.Contains(u, "MOUNTED") && !strings.Contains(u, "DISMOUNTED")) ||
-		strings.Contains(u, "FRESH") || strings.Contains(u, "ACTIVE") ||
-		strings.Contains(u, "LOW") || u == "YES" || u == "INFO" || strings.HasPrefix(u, "+00"):
-		return tview.NewTableCell(status).SetTextColor(VGABrightGreen).SetAttributes(tcell.AttrBold)
 	default:
+		// Normal/healthy statuses use the theme's authentic row foreground:
+		// - Norton Commander: Bright Cyan (#5FFFFF)
+		// - Borland Turbo C++: Bright Yellow (#FFFF5F)
+		// - Terminal Oscuro: Bright Green (#5FFF5F)
+		if currentPalette.Name == ThemeDark {
+			return tview.NewTableCell(status).SetTextColor(VGABrightGreen).SetAttributes(tcell.AttrBold)
+		}
 		return tview.NewTableCell(status).SetTextColor(currentPalette.PanelFg)
 	}
 }
 
-// BarCell creates a progress bar table cell whose color cleanly inverts to CursorFg when the row is selected.
+// BarCell creates a progress bar table cell whose color matches the active retro theme.
 func BarCell(pct float64, width int) *tview.TableCell {
 	txt := ASCIIBar(pct, width, false)
 	if currentPalette.Name == ThemeGreenPhosphor {
 		if pct >= 90.0 {
 			return tview.NewTableCell(txt).SetTextColor(PhosphorGlow).SetAttributes(tcell.AttrBold)
 		}
-		return tview.NewTableCell(txt).SetTextColor(PhosphorBright).SetAttributes(tcell.AttrBold)
+		return tview.NewTableCell(txt).SetTextColor(PhosphorBright)
 	}
-	col := VGABrightGreen
+	col := currentPalette.PanelFg
+	if currentPalette.Name == ThemeDark {
+		col = VGABrightGreen
+	}
 	if pct >= 90.0 {
 		col = VGABrightRed
 	} else if pct >= 80.0 {
 		col = VGABrightYellow
 	}
-	return tview.NewTableCell(txt).SetTextColor(col).SetAttributes(tcell.AttrBold)
+	return tview.NewTableCell(txt).SetTextColor(col)
 }
 
-// ApplyBorderTheme configures tview's box-drawing characters according to the selected style:
-// - BorderMixedUnicode (default): Simple border (┌ ─ ┐ │ └ ┘) for windows + Double border (╔ ═ ╗ ║ ╚ ╝) for focused windows & popup menus.
-// - BorderDoubleUnicode: Double border (╔ ═ ╗ ║ ╚ ╝) for all windows.
-// - BorderSingleUnicode: Simple border (┌ ─ ┐ │ └ ┘) for all windows.
-// - BorderClassicASCII: 7-bit ASCII (+ - = |) fallback.
+// ApplyBorderTheme configures tview's box-drawing characters according to the selected style.
 func ApplyBorderTheme(style model.BorderStyle) {
 	currentBorderStyle = style
 	switch style {
@@ -443,18 +482,18 @@ func ApplyBorderTheme(style model.BorderStyle) {
 		tview.Borders.BottomLeftFocus = '+'
 		tview.Borders.BottomRightFocus = '+'
 
-	default: // BorderMixedUnicode: Simple (┌─┐│└┘) + Double on Focus/Modals (╔═╗║╚╝)
-		tview.Borders.Horizontal = '─'
-		tview.Borders.Vertical = '│'
-		tview.Borders.TopLeft = '┌'
-		tview.Borders.TopRight = '┐'
-		tview.Borders.BottomLeft = '└'
-		tview.Borders.BottomRight = '┘'
-		tview.Borders.LeftT = '├'
-		tview.Borders.RightT = '┤'
-		tview.Borders.TopT = '┬'
-		tview.Borders.BottomT = '┴'
-		tview.Borders.Cross = '┼'
+	default: // BorderMixedUnicode
+		tview.Borders.Horizontal = '═'
+		tview.Borders.Vertical = '║'
+		tview.Borders.TopLeft = '╔'
+		tview.Borders.TopRight = '╗'
+		tview.Borders.BottomLeft = '╚'
+		tview.Borders.BottomRight = '╝'
+		tview.Borders.LeftT = '╠'
+		tview.Borders.RightT = '╣'
+		tview.Borders.TopT = '╦'
+		tview.Borders.BottomT = '╩'
+		tview.Borders.Cross = '╬'
 
 		tview.Borders.HorizontalFocus = '═'
 		tview.Borders.VerticalFocus = '║'
@@ -503,15 +542,15 @@ func ASCIIBar(pct float64, width int, colorize bool) string {
 	}
 	if currentPalette.Name == ThemeGreenPhosphor {
 		if pct >= 90.0 {
-			return fmt.Sprintf("[#001000:#33ff33:b]%s %5.1f%%[-:-:-]", bar, pct)
+			return fmt.Sprintf("[#001000:#00ff5f:b]%s %5.1f%%[-:-:-]", bar, pct)
 		}
-		return fmt.Sprintf("[#33ff33::b]%s %5.1f%%[-::-]", bar, pct)
+		return fmt.Sprintf("[#00ff5f::b]%s %5.1f%%[-::-]", bar, pct)
 	}
-	color := "[#55ff55::b]"
+	color := "[#5fff5f::b]"
 	if pct >= 90.0 {
-		color = "[#ff5555::b]"
+		color = "[#ff5f5f::b]"
 	} else if pct >= 80.0 {
-		color = "[#ffff55::b]"
+		color = "[#ffff5f::b]"
 	}
 	return fmt.Sprintf("%s%s %5.1f%%[-::-]", color, bar, pct)
 }
@@ -527,14 +566,14 @@ func ColorStatus(status string) string {
 			strings.Contains(u, "HIGH") || strings.Contains(u, "DRAINED") ||
 			strings.Contains(u, "FAILED") || strings.Contains(u, "CRITICAL") ||
 			strings.Contains(u, "ORA-"):
-			return "[#001000:#33ff33:b] " + status + " [-:-:-]"
+			return "[#001000:#00ff5f:b] " + status + " [-:-:-]"
 		case strings.Contains(u, "READ ONLY") || strings.Contains(u, "INACTIVE") ||
 			strings.Contains(u, "UNKNOWN") || strings.Contains(u, "PARCIAL") ||
 			strings.Contains(u, "STALE") || strings.Contains(u, "MED") ||
 			strings.Contains(u, "WARNING") || strings.Contains(u, "RUNNING"):
-			return "[#99ff99]" + status + "[-]"
+			return "[#87ff87]" + status + "[-]"
 		default:
-			return "[#33ff33::b]" + status + "[-::-]"
+			return "[#00ff5f::b]" + status + "[-::-]"
 		}
 	}
 
@@ -545,12 +584,12 @@ func ColorStatus(status string) string {
 		strings.Contains(u, "HIGH") || strings.Contains(u, "DRAINED") ||
 		strings.Contains(u, "FAILED") || strings.Contains(u, "CRITICAL") ||
 		strings.Contains(u, "ORA-"):
-		return "[#ff5555::b]" + status + "[-::-]"
+		return "[#ff5f5f::b]" + status + "[-::-]"
 	case strings.Contains(u, "READ ONLY") || strings.Contains(u, "INACTIVE") ||
 		strings.Contains(u, "UNKNOWN") || strings.Contains(u, "PARCIAL") ||
 		strings.Contains(u, "STALE") || strings.Contains(u, "MED") ||
 		strings.Contains(u, "WARNING") || strings.Contains(u, "RUNNING"):
-		return "[#ffff55::b]" + status + "[-::-]"
+		return "[#ffff5f::b]" + status + "[-::-]"
 	case strings.Contains(u, "ONLINE") || strings.Contains(u, "OPEN") ||
 		strings.Contains(u, "READ WRITE") || strings.Contains(u, "CONNECTED") ||
 		strings.Contains(u, "COMPLETED") || strings.Contains(u, "READY") ||
@@ -558,7 +597,7 @@ func ColorStatus(status string) string {
 		(strings.Contains(u, "MOUNTED") && !strings.Contains(u, "DISMOUNTED")) ||
 		strings.Contains(u, "FRESH") || strings.Contains(u, "ACTIVE") ||
 		strings.Contains(u, "LOW") || u == "YES" || u == "INFO":
-		return "[#55ff55::b]" + status + "[-::-]"
+		return "[#5fff5f::b]" + status + "[-::-]"
 	default:
 		return status
 	}

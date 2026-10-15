@@ -23,6 +23,10 @@ func main() {
 	intervalFlag := flag.Duration("interval", 10*time.Second, "Background collector refresh interval")
 	flag.Parse()
 
+	if os.Getenv("COLORTERM") == "" {
+		_ = os.Setenv("COLORTERM", "truecolor")
+	}
+
 	topo := model.ModeRAC
 	switch strings.ToLower(*topoFlag) {
 	case "single":
