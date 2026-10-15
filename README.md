@@ -126,11 +126,12 @@ Al navegar con las **Flechas (`↑`/`↓`)** y pulsar **`Enter`** sobre cualquie
 | **`Enter`** | Abrir ventana emergente de mantenimiento para el elemento seleccionado / Confirmar |
 | **`Tab`** | Alternar el foco entre el menú lateral izquierdo y la tabla de datos activa |
 | **`1` .. `8`** | Saltar directamente a cualquiera de los 8 módulos |
+| **`F1` / `h`** | **Activar / Desactivar la ayuda en los menús** (oculta o muestra las líneas secundarias de ayuda y comandos SQL) |
 | **`m`** | Abrir la ventana rápida global de tareas de mantenimiento desde cualquier vista |
 | **`b`** | Alternar en vivo el estilo de marcos: *Mixto (`┌─┐`/`╔═╗`)* $\rightarrow$ *Doble (`╔═╗`)* $\rightarrow$ *Simple (`┌─┐`)* $\rightarrow$ *ASCII (`+-|`)* |
 | **`t`** | Alternar topología en modo simulación (`ORACLE RAC` $\leftrightarrow$ `SINGLE INSTANCE`) |
-| **`Esc`** | Cerrar ventana modal emergente o devolver el foco al menú principal |
-| **`q`** | Salir de `ora-tui` |
+| **`Esc` / `←`** | Cerrar ventana modal emergente o devolver el foco a la ventana anterior / menú principal |
+| **`Ctrl+C` / `q`** | Salir inmediatamente de `ora-tui` |
 
 ---
 

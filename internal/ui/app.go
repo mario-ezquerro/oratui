@@ -19,8 +19,10 @@ type AppUI struct {
 	Content        *tview.Pages
 	LogView        *tview.TextView
 	Footer         *tview.TextView
-	ActiveView     string
-	viewFocusables map[string][]tview.Primitive
+	ActiveView      string
+	ShowMenuHelp    bool
+	activeModalList *tview.List
+	viewFocusables  map[string][]tview.Primitive
 }
 
 func NewAppUI(state *model.EnvironmentState) *AppUI {
@@ -34,11 +36,19 @@ func NewAppUI(state *model.EnvironmentState) *AppUI {
 		Pages:          tview.NewPages(),
 		State:          state,
 		ActiveView:     "overview",
+		ShowMenuHelp:   true,
 		viewFocusables: make(map[string][]tview.Primitive),
 	}
 
 	ui.buildLayout()
 	return ui
+}
+
+func (u *AppUI) winTitle(base, hint string) string {
+	if u.ShowMenuHelp && hint != "" {
+		return fmt.Sprintf(" %s (%s) ", base, hint)
+	}
+	return fmt.Sprintf(" %s ", base)
 }
 
 func (u *AppUI) Logf(format string, args ...interface{}) {
@@ -70,11 +80,11 @@ func (u *AppUI) buildLayout() {
 
 	// 2. Left Arrow-Key Navigation Menu
 	u.NavList = tview.NewList().
-		ShowSecondaryText(true).
+		ShowSecondaryText(u.ShowMenuHelp).
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(tcell.ColorNavy).
 		SetSelectedTextColor(tcell.ColorWhite)
-	u.NavList.SetBorder(true).SetTitle(" MENU [↑↓ / → Ventana] ")
+	u.NavList.SetBorder(true).SetTitle(u.winTitle("MENU", "↑↓ / → Ventana"))
 
 	viewKeys := []string{
 		"overview",
@@ -96,6 +106,7 @@ func (u *AppUI) buildLayout() {
 		AddItem("6. RMAN, Flashback & DG", "   Backups, GRP, Data Guard", '6', func() { u.switchViewAndFocus("rman_dg") }).
 		AddItem("7. Alert Log & Errores", "   Visor ORA-, ADRCI Purge", '7', func() { u.switchViewAndFocus("alert_log") }).
 		AddItem("8. Centro Mantenimiento", "   Asistentes DBA Guiados", '8', func() { u.switchViewAndFocus("maintenance") }).
+		AddItem("h. Ayuda Menus (F1)", "   Mostrar/Ocultar ayudas", 'h', func() { u.toggleMenuHelp() }).
 		AddItem("b. Cambiar Marcos/Bordes", "   Simple ┌─┐ / Doble ╔═╗", 'b', func() { u.cycleBorderMode() }).
 		AddItem("t. Cambiar Topologia", "   Alternar RAC / Single", 't', func() { u.toggleTopology() }).
 		AddItem("q. Salir (Ctrl+C / q)", "   Cerrar herramienta", 'q', func() { u.App.Stop() })
@@ -124,8 +135,8 @@ func (u *AppUI) buildLayout() {
 	// 5. Footer Keybindings Bar
 	u.Footer = tview.NewTextView().
 		SetDynamicColors(true).
-		SetTextAlign(tview.AlignCenter).
-		SetText("[yellow][←/→][-] Cambiar Ventana │ [yellow][↑/↓][-] Mover Fila │ [yellow][Enter][-] Acciones │ [yellow][m][-] Mantenimiento │ [yellow][b][-] Marcos ┌─┐/╔═╗ │ [yellow][Ctrl+C / q][-] Salir")
+		SetTextAlign(tview.AlignCenter)
+	u.refreshFooter()
 
 	// Populate initial views
 	u.rebuildContentViews()
@@ -145,11 +156,17 @@ func (u *AppUI) buildLayout() {
 	u.Pages.AddPage("main", mainFlex, true, true)
 	u.App.SetRoot(u.Pages, true)
 
-	// Global keyboard navigation (including Left/Right arrows between windows and Ctrl+C exit)
+	// Global keyboard navigation (including F1 help toggle, Left/Right arrows between windows, and Ctrl+C exit)
 	u.App.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		// Always allow Ctrl+C to immediately exit the program
 		if event.Key() == tcell.KeyCtrlC {
 			u.App.Stop()
+			return nil
+		}
+
+		// F1 toggles menu help descriptions globally (including inside open modals)
+		if event.Key() == tcell.KeyF1 {
+			u.toggleMenuHelp()
 			return nil
 		}
 
@@ -175,6 +192,9 @@ func (u *AppUI) buildLayout() {
 			return nil
 		case tcell.KeyRune:
 			switch event.Rune() {
+			case 'h', 'H':
+				u.toggleMenuHelp()
+				return nil
 			case 'm', 'M':
 				u.showGlobalMaintenancePopup()
 				return nil
@@ -190,7 +210,7 @@ func (u *AppUI) buildLayout() {
 	})
 
 	u.Logf("Auto-Discovery completado: Modo=%s │ Host=%s │ Version=%s", u.State.Topology, u.State.HostName, u.State.ReleaseVersion)
-	u.Logf("Navegacion: Use [yellow]← / →[-] para saltar entre ventanas, [yellow]↑ / ↓[-] para desplazarse, [yellow]Enter[-] para acciones y [yellow]Ctrl+C[-] para salir.")
+	u.Logf("Navegacion: [yellow]←/→[-] Cambiar Ventana │ [yellow]↑/↓[-] Mover Fila │ [yellow]F1 (o h)[-] Ocultar/Mostrar Ayuda en Menus │ [yellow]Ctrl+C[-] Salir.")
 }
 
 // moveWindowFocus moves focus forward (+1, Right Arrow / Tab) or backward (-1, Left Arrow / Shift+Tab)
@@ -237,8 +257,37 @@ func (u *AppUI) switchViewAndFocus(name string) {
 
 func (u *AppUI) RefreshAll() {
 	u.refreshHeader()
+	u.refreshFooter()
 	u.rebuildContentViews()
 	u.Content.SwitchToPage(u.ActiveView)
+}
+
+func (u *AppUI) toggleMenuHelp() {
+	u.ShowMenuHelp = !u.ShowMenuHelp
+	u.NavList.ShowSecondaryText(u.ShowMenuHelp)
+	u.NavList.SetTitle(u.winTitle("MENU", "↑↓ / → Ventana"))
+	if u.activeModalList != nil {
+		u.activeModalList.ShowSecondaryText(u.ShowMenuHelp)
+	}
+	u.refreshFooter()
+	u.rebuildContentViews()
+	u.Content.SwitchToPage(u.ActiveView)
+	stateStr := "[green]ACTIVADA[-]"
+	if !u.ShowMenuHelp {
+		stateStr = "[yellow]OCULTA (Modo Compacto)[-]"
+	}
+	u.Logf("Ayuda en menus y titulos: %s (Pulse [yellow]F1[-] o [yellow]h[-] para alternar).", stateStr)
+}
+
+func (u *AppUI) refreshFooter() {
+	helpState := "ON"
+	if !u.ShowMenuHelp {
+		helpState = "OFF"
+	}
+	u.Footer.SetText(fmt.Sprintf(
+		"[yellow][←/→][-] Ventana │ [yellow][↑/↓][-] Fila │ [yellow][Enter][-] Acciones │ [yellow][F1 / h][-] Ayuda Menus: [aqua]%s[-] │ [yellow][m][-] Mantenimiento │ [yellow][b][-] Marcos │ [yellow][Ctrl+C / q][-] Salir",
+		helpState,
+	))
 }
 
 func (u *AppUI) cycleBorderMode() {
@@ -958,10 +1007,10 @@ func (u *AppUI) buildAlertLogPage() tview.Primitive {
 // View 8: Dedicated Maintenance Center
 func (u *AppUI) buildMaintenancePage() tview.Primitive {
 	list := tview.NewList().
-		ShowSecondaryText(true).
+		ShowSecondaryText(u.ShowMenuHelp).
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(tcell.ColorNavy)
-	list.SetBorder(true).SetTitle(" ══ CENTRO DE TAREAS DE MANTENIMIENTO GUIADO (← Volver al Menu │ ↑↓ + Enter) ══ ")
+	list.SetBorder(true).SetTitle(u.winTitle("══ CENTRO DE TAREAS DE MANTENIMIENTO GUIADO ══", "← Menu │ ↑↓ + Enter │ F1 Ayuda"))
 
 	actions := u.getAllMaintenanceActions()
 	for idx, act := range actions {
@@ -1095,17 +1144,18 @@ func (u *AppUI) showInstanceMenu(idx int, inst model.InstanceInfo) {
 }
 
 func (u *AppUI) showGlobalMaintenancePopup() {
-	u.showActionMenuModal(" ══ MENU RAPIDO DE MANTENIMIENTO [Flechas ↑↓ + Enter] ══ ", u.getAllMaintenanceActions())
+	u.showActionMenuModal(" ══ MENU RAPIDO DE MANTENIMIENTO [F1 = Mostrar/Ocultar Ayuda] ══ ", u.getAllMaintenanceActions())
 }
 
 // showActionMenuModal displays a double-bordered Unicode popup window with arrow-key selectable options.
 func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 	list := tview.NewList().
-		ShowSecondaryText(true).
+		ShowSecondaryText(u.ShowMenuHelp).
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(tcell.ColorNavy).
 		SetSelectedTextColor(tcell.ColorWhite)
 	list.SetBorder(true).SetTitle(title)
+	u.activeModalList = list
 
 	for i, act := range actions {
 		fn := act.handler
@@ -1115,16 +1165,27 @@ func (u *AppUI) showActionMenuModal(title string, actions []menuAction) {
 			u.showConfirmModal(actTitle, fn)
 		})
 	}
+	list.AddItem("▸ [F1] Mostrar / Ocultar Ayuda en este Menu", "      Alterna las descripciones de comandos SQL/SO", 0, func() {
+		u.ShowMenuHelp = !u.ShowMenuHelp
+		list.ShowSecondaryText(u.ShowMenuHelp)
+		u.NavList.ShowSecondaryText(u.ShowMenuHelp)
+		u.refreshFooter()
+	})
 	list.AddItem("▸ [Esc / ←] Cancelar / Cerrar Ventana", "      Volver a la pantalla anterior", 0, func() {
 		u.Pages.RemovePage("modal")
 		u.focusFirstRightWindow()
 	})
 
+	modalHeight := 20
+	if !u.ShowMenuHelp {
+		modalHeight = len(actions) + 5
+	}
+
 	modalFlex := tview.NewFlex().
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
-			AddItem(list, 18, 1, true).
+			AddItem(list, modalHeight, 1, true).
 			AddItem(nil, 0, 1, false), 82, 1, true).
 		AddItem(nil, 0, 1, false)
 
