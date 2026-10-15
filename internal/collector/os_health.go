@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mario/ora-tui/internal/discovery"
 	"github.com/mario/ora-tui/internal/executor"
@@ -231,8 +232,12 @@ func CollectOSHealth(ctx context.Context, runner *executor.Runner, env *discover
 	var filesystems []model.FilesystemMount
 	if runner != nil {
 		envMap := map[string]string{"LC_ALL": "C"}
-		dfBlocksOut, _ := runner.RunCommand(ctx, nil, false, envMap, nil, "df", "-PTm")
-		dfInodesOut, _ := runner.RunCommand(ctx, nil, false, envMap, nil, "df", "-Pi")
+		dfCtx1, cancel1 := context.WithTimeout(ctx, 3*time.Second)
+		dfBlocksOut, _ := runner.RunCommand(dfCtx1, nil, false, envMap, nil, "df", "-PTm")
+		cancel1()
+		dfCtx2, cancel2 := context.WithTimeout(ctx, 3*time.Second)
+		dfInodesOut, _ := runner.RunCommand(dfCtx2, nil, false, envMap, nil, "df", "-Pi")
+		cancel2()
 		filesystems = ParseDFOutput(dfBlocksOut, dfInodesOut)
 	}
 
@@ -596,7 +601,9 @@ func collectStoragePaths(ctx context.Context, runner *executor.Runner) []model.S
 	if runner != nil {
 		for _, bin := range []string{"/sbin/multipath", "/usr/sbin/multipath"} {
 			if _, err := os.Stat(bin); err == nil {
-				out, err := runner.RunCommand(ctx, nil, false, map[string]string{"LC_ALL": "C"}, nil, bin, "-ll")
+				mpCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				out, err := runner.RunCommand(mpCtx, nil, false, map[string]string{"LC_ALL": "C"}, nil, bin, "-ll")
+				cancel()
 				if err == nil && strings.TrimSpace(out) != "" {
 					mpList := ParseMultipathOutput(out)
 					paths = append(paths, mpList...)

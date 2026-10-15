@@ -208,19 +208,19 @@ func (u *AppUI) updateFocusVisuals() {
 		case ThemeTurboC:
 			u.Header.SetBorderColor(VGABlack)
 			u.Header.SetTitleColor(VGABlack)
-			u.Header.SetTitle("[#000000:#a8a8a8:b] [[#af0000::b]≡[#000000]] File  Edit  Search  Run  Compile  Debug  Project  Options  Window  Help [-:-:-]")
+			u.Header.SetTitle("[#000000:#a8a8a8:b] [[#af0000::b]≡[#000000]] File  Edit  Search  Run  Compile  Debug  Project  Options  Window  Help :: ORA-TUI v1.3.0 [-:-:-]")
 		case ThemeNorton:
 			u.Header.SetBorderColor(VGABrightCyan)
 			u.Header.SetTitleColor(VGABrightYellow)
-			u.Header.SetTitle("[#000000:#00afaf:b] NORTON COMMANDER ORA-TUI :: ORACLE CLUSTER & DB MANAGER [-:-:-]")
+			u.Header.SetTitle("[#000000:#00afaf:b] NORTON COMMANDER ORA-TUI v1.3.0 :: ORACLE CLUSTER, DB & SERVER MANAGER [-:-:-]")
 		case ThemeGreenPhosphor:
 			u.Header.SetBorderColor(PhosphorGlow)
 			u.Header.SetTitleColor(PhosphorGlow)
-			u.Header.SetTitle("[#001000:#00ff5f:b] IBM 5151 P1 PHOSPHOR CRT :: ORA-TUI ORACLE MANAGER [-:-:-]")
+			u.Header.SetTitle("[#001000:#00ff5f:b] IBM 5151 P1 PHOSPHOR CRT :: ORA-TUI v1.3.0 ORACLE MANAGER [-:-:-]")
 		default:
 			u.Header.SetBorderColor(pal.ActiveBorder)
 			u.Header.SetTitleColor(pal.ActiveTitle)
-			u.Header.SetTitle(" ══ ORA-TUI :: ORACLE CLUSTER & DATABASE MANAGER ══ ")
+			u.Header.SetTitle(" ══ ORA-TUI v1.3.0 :: ORACLE CLUSTER & DATABASE MANAGER ══ ")
 		}
 	}
 	if u.LogView != nil {

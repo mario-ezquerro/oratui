@@ -20,8 +20,14 @@ func main() {
 	mockFlag := flag.Bool("mock", false, "Force interactive mock/simulation mode with sample Oracle data")
 	topoFlag := flag.String("topology", "rac", "Simulated topology in mock mode: rac, restart, or single")
 	previewFlag := flag.Bool("preview", false, "Print static Unicode box-drawing mockup to stdout and exit")
+	versionFlag := flag.Bool("version", false, "Print ora-tui version and exit")
 	intervalFlag := flag.Duration("interval", 10*time.Second, "Background collector refresh interval")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Println("ora-tui v1.3.0 (MS-DOS Retro Themes + Server/SAN Multipath Health Checks)")
+		return
+	}
 
 	if os.Getenv("COLORTERM") == "" {
 		_ = os.Setenv("COLORTERM", "truecolor")
