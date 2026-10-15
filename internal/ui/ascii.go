@@ -149,6 +149,18 @@ func ASCIIBar(pct float64, width int, colorize bool) string {
 func ColorStatus(status string) string {
 	u := strings.ToUpper(status)
 	switch {
+	case strings.Contains(u, "OFFLINE") || strings.Contains(u, "DOWN") ||
+		strings.Contains(u, "NO READY") || strings.Contains(u, "SIN SERVICIOS") ||
+		strings.Contains(u, "INVALID") || strings.Contains(u, "BLOCK") ||
+		strings.Contains(u, "HIGH") || strings.Contains(u, "DRAINED") ||
+		strings.Contains(u, "FAILED") || strings.Contains(u, "CRITICAL") ||
+		strings.Contains(u, "ORA-"):
+		return "[red]" + status + "[-]"
+	case strings.Contains(u, "READ ONLY") || strings.Contains(u, "INACTIVE") ||
+		strings.Contains(u, "UNKNOWN") || strings.Contains(u, "PARCIAL") ||
+		strings.Contains(u, "STALE") || strings.Contains(u, "MED") ||
+		strings.Contains(u, "WARNING") || strings.Contains(u, "RUNNING"):
+		return "[yellow]" + status + "[-]"
 	case strings.Contains(u, "ONLINE") || strings.Contains(u, "OPEN") ||
 		strings.Contains(u, "READ WRITE") || strings.Contains(u, "CONNECTED") ||
 		strings.Contains(u, "COMPLETED") || strings.Contains(u, "READY") ||
@@ -157,16 +169,6 @@ func ColorStatus(status string) string {
 		strings.Contains(u, "FRESH") || strings.Contains(u, "ACTIVE") ||
 		strings.Contains(u, "LOW") || u == "YES" || u == "INFO":
 		return "[green]" + status + "[-]"
-	case strings.Contains(u, "READ ONLY") || strings.Contains(u, "INACTIVE") ||
-		strings.Contains(u, "STALE") || strings.Contains(u, "MED") ||
-		strings.Contains(u, "WARNING") || strings.Contains(u, "RUNNING"):
-		return "[yellow]" + status + "[-]"
-	case strings.Contains(u, "OFFLINE") || strings.Contains(u, "DOWN") ||
-		strings.Contains(u, "INVALID") || strings.Contains(u, "BLOCK") ||
-		strings.Contains(u, "HIGH") || strings.Contains(u, "DRAINED") ||
-		strings.Contains(u, "FAILED") || strings.Contains(u, "CRITICAL") ||
-		strings.Contains(u, "ORA-"):
-		return "[red]" + status + "[-]"
 	default:
 		return status
 	}

@@ -144,13 +144,27 @@ type ASMDiskgroup struct {
 	OfflineDisks int
 }
 
+type ListenerServiceHandler struct {
+	ListenerName string
+	ServiceName  string
+	InstanceName string
+	Status       string // READY, UNKNOWN, BLOCKED, RESTRICTED
+	Handlers     int
+}
+
 type ListenerInfo struct {
-	Name     string
-	Type     string // LOCAL, SCAN
-	Node     string
-	State    string // ONLINE, OFFLINE, DEGRADED
-	Endpoint string
-	Services int
+	Name           string
+	Type           string // LOCAL, SCAN
+	Node           string
+	State          string // ONLINE, OFFLINE (tnslsnr process state)
+	ReadyStatus    string // READY, NO READY (Solo UNKNOWN), BLOCKED, SIN SERVICIOS, OFFLINE
+	Endpoint       string
+	Services       int
+	ReadyCount     int
+	UnknownCount   int
+	BlockedCount   int
+	ServiceSummary string
+	ServiceList    []ListenerServiceHandler
 }
 
 type RMANBackupJob struct {

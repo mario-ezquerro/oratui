@@ -27,7 +27,15 @@ SELECT
     NVL(d.flashback_on, 'NO'),
     FLOOR(SYSDATE - i.startup_time) || 'd ' || MOD(FLOOR((SYSDATE - i.startup_time)*24), 24) || 'h' AS uptime,
     NVL((SELECT ROUND(SUM(value)/1024/1024) FROM gv$sga s WHERE s.inst_id = i.inst_id), 0) AS sga_mb,
-    NVL((SELECT ROUND(value/1024/1024) FROM gv$pgastat p WHERE p.inst_id = i.inst_id AND p.name = 'total PGA allocated'), 0) AS pga_mb,
+    NVL((
+        SELECT ROUND(
+            NVL(NULLIF(MAX(CASE WHEN p.name = 'aggregate PGA target parameter' THEN p.value END), 0),
+                MAX(CASE WHEN p.name = 'total PGA allocated' THEN p.value END)
+            ) / 1024 / 1024
+        )
+        FROM gv$pgastat p
+        WHERE p.inst_id = i.inst_id
+    ), 0) AS pga_mb,
     NVL((SELECT ROUND(space_used*100/NULLIF(space_limit,0)) FROM v$recovery_file_dest WHERE ROWNUM = 1), 0) AS fra_pct
 FROM gv$instance i
 CROSS JOIN v$database d

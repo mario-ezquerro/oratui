@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -488,7 +489,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 
 	instTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
 	instTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] INSTANCIAS DE BASE DE DATOS & DATA GUARD", "←/→ Ventana │ Enter = Start/Stop"))
-	iHeaders := []string{"INST", "DB_NAME", "NODO", "ESTADO", "OPEN_MODE", "FLASHBACK", "SGA/PGA", "FRA_USO", "DG_LAG", "UPTIME"}
+	iHeaders := []string{"INST", "DB_NAME", "NODO", "ESTADO", "OPEN_MODE", "FLASHBACK", "MEMORIA (SGA/PGA)", "FRA_USO", "DG_LAG", "UPTIME"}
 	for c, h := range iHeaders {
 		instTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
 	}
@@ -500,7 +501,7 @@ func (u *AppUI) buildOverviewPage() tview.Primitive {
 		instTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(inst.Status)))
 		instTbl.SetCell(r, 4, tview.NewTableCell(ColorStatus(inst.OpenMode)))
 		instTbl.SetCell(r, 5, tview.NewTableCell(ColorStatus(inst.FlashbackOn)))
-		instTbl.SetCell(r, 6, tview.NewTableCell(fmt.Sprintf("%dG/%dG", inst.SGAMB/1024, inst.PGAMB/1024)))
+		instTbl.SetCell(r, 6, tview.NewTableCell(fmt.Sprintf("SGA:%s / PGA:%s", formatMemGB(inst.SGAMB), formatMemGB(inst.PGAMB))))
 		instTbl.SetCell(r, 7, tview.NewTableCell(ASCIIBar(float64(inst.FRAUsedPct), 8, true)))
 		instTbl.SetCell(r, 8, tview.NewTableCell("[green]"+inst.DGLag+"[-]"))
 		instTbl.SetCell(r, 9, tview.NewTableCell(inst.Uptime))
@@ -844,7 +845,7 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 // View 5: ASM Storage & Listeners
 func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	asmTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	asmTbl.SetBorder(true).SetTitle(u.winTitle("[1/2] ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup)", "←/→ Ventana"))
+	asmTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup)", "←/→ Ventana"))
 	aHeaders := []string{"DISKGROUP", "ESTADO", "REDUNDANCIA", "TOTAL_MB", "LIBRE_MB", "USABLE_MB", "USO % (BARRA)", "DISCOS_OFFLINE"}
 	for c, h := range aHeaders {
 		asmTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -867,19 +868,28 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	ensureSelectableRow(asmTbl, len(aHeaders), "Sin Diskgroups ASM (Almacenamiento en Filesystem)")
 
 	lsnrTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	lsnrTbl.SetBorder(true).SetTitle(u.winTitle("[2/2] RED ORACLE: LISTENERS LOCALES & SCAN", "←/→ Ventana │ Enter = Start/Stop"))
-	lHeaders := []string{"LISTENER", "TIPO", "NODO", "ESTADO", "ENDPOINT", "SERVICIOS_REG"}
+	lsnrTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] RED ORACLE: LISTENERS LOCALES & SCAN", "←/→ Ventana │ Enter = Start/Stop"))
+	lHeaders := []string{"LISTENER", "TIPO", "NODO", "PROCESO", "ESTADO_READY", "ENDPOINT", "SERVICIOS DETECTADOS"}
 	for c, h := range lHeaders {
 		lsnrTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
 	}
 	for i, l := range u.State.Listeners {
 		r := i + 1
+		readySt := l.ReadyStatus
+		if readySt == "" {
+			readySt = l.State
+		}
+		svcSummary := l.ServiceSummary
+		if svcSummary == "" {
+			svcSummary = fmt.Sprintf("%d servicios", l.Services)
+		}
 		lsnrTbl.SetCell(r, 0, tview.NewTableCell("[white::b]"+l.Name))
 		lsnrTbl.SetCell(r, 1, tview.NewTableCell(l.Type))
 		lsnrTbl.SetCell(r, 2, tview.NewTableCell(l.Node))
 		lsnrTbl.SetCell(r, 3, tview.NewTableCell(ColorStatus(l.State)))
-		lsnrTbl.SetCell(r, 4, tview.NewTableCell(l.Endpoint))
-		lsnrTbl.SetCell(r, 5, tview.NewTableCell(fmt.Sprintf("%d", l.Services)))
+		lsnrTbl.SetCell(r, 4, tview.NewTableCell(ColorStatus(readySt)))
+		lsnrTbl.SetCell(r, 5, tview.NewTableCell(l.Endpoint))
+		lsnrTbl.SetCell(r, 6, tview.NewTableCell("[aqua]"+svcSummary+"[-]"))
 	}
 	ensureSelectableRow(lsnrTbl, len(lHeaders), "Sin listeners activos detectados")
 	lsnrTbl.SetSelectedFunc(func(row, col int) {
@@ -893,13 +903,18 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 				{"Recargar Configuracion (lsnrctl reload)", "Recarga listener.ora sin cortar conexiones", func() {
 					u.Logf("[LSNRCTL] lsnrctl reload %s en %s -> [green]The command completed successfully[-]", l.Name, l.Node)
 				}},
+				{"Forzar Registro Dinamico en BD (ALTER SYSTEM REGISTER)", "Fuerza a LREG/PMON a registrar servicios en estado READY", func() {
+					u.Logf("[SQL] ALTER SYSTEM REGISTER; -> [green]Servicios registrados dinamicamente en estado READY[-]")
+				}},
 				{"Parar Listener (lsnrctl stop)", "Detiene nuevas conexiones en este listener", func() {
 					u.State.Listeners[row-1].State = "OFFLINE"
+					u.State.Listeners[row-1].ReadyStatus = "OFFLINE"
 					u.rebuildContentViews()
 					u.Logf("[LSNRCTL] Listener %s detenido en %s", l.Name, l.Node)
 				}},
 				{"Iniciar Listener (lsnrctl start)", "Arranca el listener y registra servicios", func() {
 					u.State.Listeners[row-1].State = "ONLINE"
+					u.State.Listeners[row-1].ReadyStatus = "READY"
 					u.rebuildContentViews()
 					u.Logf("[LSNRCTL] Listener %s iniciado en %s", l.Name, l.Node)
 				}},
@@ -907,11 +922,51 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 		)
 	})
 
-	u.viewFocusables["asm_net"] = []tview.Primitive{asmTbl, lsnrTbl}
+	svcTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	svcTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] DETALLE DE SERVICIOS EN LISTENER (READY / UNKNOWN / BLOCKED)", "←/→ Ventana │ Enter = Forzar Registro"))
+	sHeaders := []string{"LISTENER", "SERVICIO", "INSTANCIA", "ESTADO_REAL", "TIPO_REGISTRO / DISPONIBILIDAD", "HANDLERS"}
+	for c, h := range sHeaders {
+		svcTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
+	}
+	svcRow := 1
+	for _, l := range u.State.Listeners {
+		for _, sh := range l.ServiceList {
+			regDesc := "DINAMICO (LREG/PMON - Acepta Conexiones)"
+			switch strings.ToUpper(sh.Status) {
+			case "UNKNOWN":
+				regDesc = "[yellow]ESTATICO (listener.ora - No garantiza BD arriba)[-]"
+			case "BLOCKED", "RESTRICTED":
+				regDesc = "[red]BLOQUEADO (Instancia en MOUNT/NOMOUNT/RESTRICTED)[-]"
+			case "READY":
+				regDesc = "[green]DINAMICO (LREG/PMON - Listo para conexiones)[-]"
+			}
+			svcTbl.SetCell(svcRow, 0, tview.NewTableCell(sh.ListenerName))
+			svcTbl.SetCell(svcRow, 1, tview.NewTableCell("[white::b]"+sh.ServiceName))
+			svcTbl.SetCell(svcRow, 2, tview.NewTableCell(sh.InstanceName))
+			svcTbl.SetCell(svcRow, 3, tview.NewTableCell(ColorStatus(sh.Status)))
+			svcTbl.SetCell(svcRow, 4, tview.NewTableCell(regDesc))
+			svcTbl.SetCell(svcRow, 5, tview.NewTableCell(fmt.Sprintf("%d handler(s)", sh.Handlers)))
+			svcRow++
+		}
+	}
+	ensureSelectableRow(svcTbl, len(sHeaders), "Sin servicios registrados en el listener (Ejecute ALTER SYSTEM REGISTER)")
+	svcTbl.SetSelectedFunc(func(row, col int) {
+		u.showActionMenuModal(
+			" ══ REGISTRO DE SERVICIOS EN LISTENER ══ ",
+			[]menuAction{
+				{"Forzar Registro Dinamico (ALTER SYSTEM REGISTER)", "Obliga a LREG/PMON a publicar servicios como READY en el listener", func() {
+					u.Logf("[SQL] ALTER SYSTEM REGISTER; -> [green]OK (LREG notificado)[-]")
+				}},
+			},
+		)
+	})
+
+	u.viewFocusables["asm_net"] = []tview.Primitive{asmTbl, lsnrTbl, svcTbl}
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(asmTbl, 7, 0, true).
-		AddItem(lsnrTbl, 0, 1, false)
+		AddItem(asmTbl, 6, 0, true).
+		AddItem(lsnrTbl, 6, 0, false).
+		AddItem(svcTbl, 0, 1, false)
 }
 
 // View 6: RMAN Backups, Flashback Restore Points & Data Guard
@@ -1296,3 +1351,16 @@ func (u *AppUI) runSimulatedTask(taskName string, steps []string, onDone func())
 		onDone()
 	}
 }
+
+func formatMemGB(mb int) string {
+	if mb <= 0 {
+		return "0G"
+	}
+	gb := float64(mb) / 1024.0
+	rounded := math.Round(gb*10) / 10
+	if rounded == math.Trunc(rounded) {
+		return fmt.Sprintf("%.0fG", rounded)
+	}
+	return fmt.Sprintf("%.1fG", rounded)
+}
+

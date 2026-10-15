@@ -60,3 +60,23 @@ USERS|PERMANENT|ONLINE|19456|32768|18350|14418|56.0|YES|1
 	}
 }
 
+func TestParseLsnrctlStatus(t *testing.T) {
+	raw := `
+STATUS of the LISTENER
+Listening Endpoints Summary...
+  (DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=srv-dbgriar-des)(PORT=1521)))
+Services Summary...
+Service "griar" has 2 instance(s).
+  Instance "griar", status UNKNOWN, has 1 handler(s) for this service...
+  Instance "griar", status READY, has 1 handler(s) for this service...
+Service "griarXDB" has 1 instance(s).
+  Instance "griar", status READY, has 1 handler(s) for this service...
+The command completed successfully
+`
+	info := ParseLsnrctlStatus("LISTENER", "srv-dbgriar-des", raw)
+	if info.State != "ONLINE" || info.ReadyCount != 2 || info.UnknownCount != 1 || len(info.ServiceList) != 3 {
+		t.Fatalf("unexpected listener info: %+v", info)
+	}
+}
+
+
