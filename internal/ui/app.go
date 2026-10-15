@@ -1,12 +1,15 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"math"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/mario/ora-tui/internal/executor"
 	"github.com/mario/ora-tui/internal/model"
 	"github.com/rivo/tview"
 )
@@ -919,7 +922,7 @@ func (u *AppUI) buildTablesPage() tview.Primitive {
 // View 5: ASM Storage & Listeners
 func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 	asmTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	asmTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup)", "←/→ Ventana"))
+	asmTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] ALMACENAMIENTO ASM DISKGROUPS (v$asm_diskgroup)", "←/→ Ventana │ Enter = Control Listener"))
 	aHeaders := []string{"DISKGROUP", "ESTADO", "REDUNDANCIA", "TOTAL_MB", "LIBRE_MB", "USABLE_MB", "USO % (BARRA)", "DISCOS_OFFLINE"}
 	for c, h := range aHeaders {
 		asmTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -939,10 +942,13 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 		}
 		asmTbl.SetCell(r, 7, tview.NewTableCell(off))
 	}
-	ensureSelectableRow(asmTbl, len(aHeaders), "Sin Diskgroups ASM (Almacenamiento en Filesystem)")
+	ensureSelectableRow(asmTbl, len(aHeaders), "Sin Diskgroups ASM (Almacenamiento en Filesystem - Pulse Enter o → para Listeners)")
+	asmTbl.SetSelectedFunc(func(row, col int) {
+		u.showListenerControlModal(0)
+	})
 
 	lsnrTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	lsnrTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] RED ORACLE: LISTENERS LOCALES & SCAN", "←/→ Ventana │ Enter = Start/Stop"))
+	lsnrTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] RED ORACLE: LISTENERS LOCALES & SCAN", "←/→ Ventana │ Enter = Arrancar/Parar/Resetear"))
 	lHeaders := []string{"LISTENER", "TIPO", "NODO", "PROCESO", "ESTADO_READY", "ENDPOINT", "SERVICIOS DETECTADOS"}
 	for c, h := range lHeaders {
 		lsnrTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -965,39 +971,17 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 		lsnrTbl.SetCell(r, 5, tview.NewTableCell(l.Endpoint))
 		lsnrTbl.SetCell(r, 6, tview.NewTableCell("[aqua]"+svcSummary+"[-]"))
 	}
-	ensureSelectableRow(lsnrTbl, len(lHeaders), "Sin listeners activos detectados")
+	ensureSelectableRow(lsnrTbl, len(lHeaders), "Sin listeners activos (Pulse Enter para Arrancar / Controlar Listener)")
 	lsnrTbl.SetSelectedFunc(func(row, col int) {
-		if row <= 0 || row > len(u.State.Listeners) {
-			return
+		idx := 0
+		if row > 0 && row <= len(u.State.Listeners) {
+			idx = row - 1
 		}
-		l := u.State.Listeners[row-1]
-		u.showActionMenuModal(
-			fmt.Sprintf(" ══ CONTROL DE LISTENER: %s (%s) ══ ", l.Name, l.Node),
-			[]menuAction{
-				{"Recargar Configuracion (lsnrctl reload)", "Recarga listener.ora sin cortar conexiones", func() {
-					u.Logf("[LSNRCTL] lsnrctl reload %s en %s -> [green]The command completed successfully[-]", l.Name, l.Node)
-				}},
-				{"Forzar Registro Dinamico en BD (ALTER SYSTEM REGISTER)", "Fuerza a LREG/PMON a registrar servicios en estado READY", func() {
-					u.Logf("[SQL] ALTER SYSTEM REGISTER; -> [green]Servicios registrados dinamicamente en estado READY[-]")
-				}},
-				{"Parar Listener (lsnrctl stop)", "Detiene nuevas conexiones en este listener", func() {
-					u.State.Listeners[row-1].State = "OFFLINE"
-					u.State.Listeners[row-1].ReadyStatus = "OFFLINE"
-					u.rebuildContentViews()
-					u.Logf("[LSNRCTL] Listener %s detenido en %s", l.Name, l.Node)
-				}},
-				{"Iniciar Listener (lsnrctl start)", "Arranca el listener y registra servicios", func() {
-					u.State.Listeners[row-1].State = "ONLINE"
-					u.State.Listeners[row-1].ReadyStatus = "READY"
-					u.rebuildContentViews()
-					u.Logf("[LSNRCTL] Listener %s iniciado en %s", l.Name, l.Node)
-				}},
-			},
-		)
+		u.showListenerControlModal(idx)
 	})
 
 	svcTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	svcTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] DETALLE DE SERVICIOS EN LISTENER (READY / UNKNOWN / BLOCKED)", "←/→ Ventana │ Enter = Forzar Registro"))
+	svcTbl.SetBorder(true).SetTitle(u.winTitle("[3/3] DETALLE DE SERVICIOS EN LISTENER (READY / UNKNOWN / BLOCKED)", "←/→ Ventana │ Enter = Arrancar/Parar/Resetear"))
 	sHeaders := []string{"LISTENER", "SERVICIO", "INSTANCIA", "ESTADO_REAL", "TIPO_REGISTRO / DISPONIBILIDAD", "HANDLERS"}
 	for c, h := range sHeaders {
 		svcTbl.SetCell(0, c, tview.NewTableCell("[yellow::b]"+h).SetSelectable(false))
@@ -1023,24 +1007,121 @@ func (u *AppUI) buildASMNetworkPage() tview.Primitive {
 			svcRow++
 		}
 	}
-	ensureSelectableRow(svcTbl, len(sHeaders), "Sin servicios registrados en el listener (Ejecute ALTER SYSTEM REGISTER)")
+	ensureSelectableRow(svcTbl, len(sHeaders), "Sin servicios registrados en el listener (Pulse Enter para Arrancar/Resetear Listener)")
 	svcTbl.SetSelectedFunc(func(row, col int) {
-		u.showActionMenuModal(
-			" ══ REGISTRO DE SERVICIOS EN LISTENER ══ ",
-			[]menuAction{
-				{"Forzar Registro Dinamico (ALTER SYSTEM REGISTER)", "Obliga a LREG/PMON a publicar servicios como READY en el listener", func() {
-					u.Logf("[SQL] ALTER SYSTEM REGISTER; -> [green]OK (LREG notificado)[-]")
-				}},
-			},
-		)
+		u.showListenerControlModal(0)
 	})
 
-	u.viewFocusables["asm_net"] = []tview.Primitive{asmTbl, lsnrTbl, svcTbl}
+	hasASM := len(u.State.Diskgroups) > 0
+	if hasASM {
+		u.viewFocusables["asm_net"] = []tview.Primitive{asmTbl, lsnrTbl, svcTbl}
+	} else {
+		// On Single Instance / Filesystem without ASM, focus Listeners first when entering View 5
+		u.viewFocusables["asm_net"] = []tview.Primitive{lsnrTbl, svcTbl, asmTbl}
+	}
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(asmTbl, 6, 0, true).
-		AddItem(lsnrTbl, 6, 0, false).
+		AddItem(asmTbl, 6, 0, hasASM).
+		AddItem(lsnrTbl, 6, 0, !hasASM).
 		AddItem(svcTbl, 0, 1, false)
+}
+
+func (u *AppUI) showListenerControlModal(idx int) {
+	lsnrName := "LISTENER"
+	nodeName := u.State.HostName
+	if idx >= 0 && idx < len(u.State.Listeners) {
+		lsnrName = u.State.Listeners[idx].Name
+		nodeName = u.State.Listeners[idx].Node
+	}
+
+	runLsnrCmd := func(actionLabel string, cmds [][]string, newState, newReady string) {
+		if idx >= 0 && idx < len(u.State.Listeners) && newState != "" {
+			u.State.Listeners[idx].State = newState
+			u.State.Listeners[idx].ReadyStatus = newReady
+		}
+		u.rebuildContentViews()
+
+		if u.State.IsMock || u.State.OracleHome == "" {
+			u.Logf("[LSNRCTL] %s (%s @ %s) -> [green]OK[-]", actionLabel, lsnrName, nodeName)
+			return
+		}
+
+		go func() {
+			runner := executor.NewRunner(20*time.Second, false)
+			home := u.State.GridHome
+			if home == "" || strings.HasPrefix(home, "N/A") {
+				home = u.State.OracleHome
+			}
+			owner, _ := executor.DetectFileOwner(home)
+			lsnrBin := filepath.Join(home, "bin", "lsnrctl")
+			envMap := map[string]string{
+				"ORACLE_HOME": home,
+				"LC_ALL":      "C",
+				"NLS_LANG":    "AMERICAN_AMERICA.AL32UTF8",
+			}
+			for _, args := range cmds {
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				out, err := runner.RunCommand(ctx, owner, false, envMap, nil, lsnrBin, args...)
+				cancel()
+				u.App.QueueUpdateDraw(func() {
+					if err != nil {
+						u.Logf("[LSNRCTL] lsnrctl %s -> [yellow]%v[-]", strings.Join(args, " "), err)
+					} else {
+						u.Logf("[LSNRCTL] lsnrctl %s -> [green]The command completed successfully[-]", strings.Join(args, " "))
+					}
+					for _, line := range strings.Split(out, "\n") {
+						trimmed := strings.TrimSpace(line)
+						if strings.HasPrefix(trimmed, "Service \"") || strings.HasPrefix(trimmed, "Instance \"") || strings.HasPrefix(trimmed, "TNS-") {
+							u.Logf("    %s", trimmed)
+						}
+					}
+				})
+			}
+		}()
+	}
+
+	u.showActionMenuModal(
+		fmt.Sprintf(" ══ CONTROL DE LISTENER: %s (%s) ══ ", lsnrName, nodeName),
+		[]menuAction{
+			{"Iniciar / Arrancar Listener (lsnrctl start)", fmt.Sprintf("lsnrctl start %s", lsnrName), func() {
+				runLsnrCmd("Arrancar Listener", [][]string{{"start", lsnrName}}, "ONLINE", "READY")
+			}},
+			{"Parar Listener (lsnrctl stop)", fmt.Sprintf("lsnrctl stop %s", lsnrName), func() {
+				runLsnrCmd("Parar Listener", [][]string{{"stop", lsnrName}}, "OFFLINE", "OFFLINE")
+			}},
+			{"Reiniciar / Resetear Listener (stop + start)", fmt.Sprintf("lsnrctl stop %s && lsnrctl start %s", lsnrName, lsnrName), func() {
+				runLsnrCmd("Reiniciar / Resetear Listener", [][]string{{"stop", lsnrName}, {"start", lsnrName}}, "ONLINE", "READY")
+			}},
+			{"Recargar Configuracion sin Corte (lsnrctl reload)", fmt.Sprintf("lsnrctl reload %s (Recarga listener.ora en caliente)", lsnrName), func() {
+				runLsnrCmd("Recargar Listener", [][]string{{"reload", lsnrName}}, "ONLINE", "READY")
+			}},
+			{"Forzar Registro Dinamico en BD (ALTER SYSTEM REGISTER)", "Obliga a LREG/PMON a publicar servicios como READY en el listener", func() {
+				if u.State.IsMock || u.State.OracleHome == "" || len(u.State.Instances) == 0 {
+					u.Logf("[SQL] ALTER SYSTEM REGISTER; -> [green]Servicios registrados dinamicamente en estado READY[-]")
+					return
+				}
+				sid := u.State.Instances[0].InstName
+				home := u.State.OracleHome
+				go func() {
+					runner := executor.NewRunner(15*time.Second, false)
+					owner, _ := executor.DetectFileOwner(home)
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					_, _, err := runner.RunSQLPlus(ctx, home, sid, owner, "ALTER SYSTEM REGISTER;", nil)
+					cancel()
+					u.App.QueueUpdateDraw(func() {
+						if err != nil {
+							u.Logf("[SQL] ALTER SYSTEM REGISTER -> [red]%v[-]", err)
+						} else {
+							u.Logf("[SQL] ALTER SYSTEM REGISTER; -> [green]OK (LREG/PMON ha publicado los servicios en el Listener)[-]")
+						}
+					})
+				}()
+			}},
+			{"Comprobar Estado Completo (lsnrctl status)", fmt.Sprintf("lsnrctl status %s", lsnrName), func() {
+				runLsnrCmd("Estado de Listener", [][]string{{"status", lsnrName}}, "", "")
+			}},
+		},
+	)
 }
 
 // View 6: RMAN Backups, Flashback Restore Points & Data Guard

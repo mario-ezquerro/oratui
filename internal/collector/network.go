@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -166,15 +165,16 @@ func scanProcListeners(procRoot string) []discoveredLsnrProc {
 		if err != nil || len(raw) == 0 {
 			continue
 		}
-		parts := bytes.Split(raw, []byte{0})
-		if len(parts) == 0 || !strings.HasSuffix(string(parts[0]), "tnslsnr") {
+		clean := strings.ReplaceAll(string(raw), "\x00", " ")
+		fields := strings.Fields(clean)
+		if len(fields) == 0 || !strings.HasSuffix(fields[0], "tnslsnr") {
 			continue
 		}
-		binPath := string(parts[0])
+		binPath := fields[0]
 		home := filepath.Dir(filepath.Dir(binPath))
 		lsnrName := "LISTENER"
-		if len(parts) > 1 && len(parts[1]) > 0 && !strings.HasPrefix(string(parts[1]), "-") {
-			lsnrName = string(parts[1])
+		if len(fields) > 1 && !strings.HasPrefix(fields[1], "-") {
+			lsnrName = fields[1]
 		}
 		key := strings.ToUpper(lsnrName)
 		if !seen[key] {
@@ -214,12 +214,12 @@ func CollectNetwork(
 			return model.ListenerInfo{}, false
 		}
 		lsnrBin := filepath.Join(home, "bin", "lsnrctl")
-		out, err := runner.RunCommand(ctx, owner, false, map[string]string{
+		out, _ := runner.RunCommand(ctx, owner, false, map[string]string{
 			"ORACLE_HOME": home,
 			"LC_ALL":      "C",
 			"NLS_LANG":    "AMERICAN_AMERICA.AL32UTF8",
 		}, nil, lsnrBin, "status", lsnrName)
-		if err != nil && out == "" {
+		if out == "" {
 			return model.ListenerInfo{}, false
 		}
 		return ParseLsnrctlStatus(lsnrName, env.HostName, out), true
@@ -271,9 +271,23 @@ func CollectNetwork(
 		}
 	}
 
-	if len(listeners) == 0 && env.OracleHome != "" {
-		if parsed, ok := runLsnrStatus("LISTENER", env.OracleHome); ok {
-			listeners = append(listeners, parsed)
+	if len(listeners) == 0 {
+		if env.OracleHome != "" {
+			if parsed, ok := runLsnrStatus("LISTENER", env.OracleHome); ok {
+				listeners = append(listeners, parsed)
+			}
+		}
+		if len(listeners) == 0 {
+			listeners = append(listeners, model.ListenerInfo{
+				Name:           "LISTENER",
+				Type:           "LOCAL",
+				Node:           env.HostName,
+				State:          "OFFLINE",
+				ReadyStatus:    "OFFLINE",
+				Endpoint:       "TCP:1521",
+				Services:       0,
+				ServiceSummary: "Listener detenido (Pulse Enter para Arrancar)",
+			})
 		}
 	}
 
