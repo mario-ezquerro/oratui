@@ -1,14 +1,15 @@
 name: "ora-tui"
 arch: "amd64"
 platform: "linux"
-version: "1.6.0"
+version: "1.7.0"
 release: "1"
 section: "database"
 priority: "optional"
 maintainer: "Mario <mario@ora-tui.local>"
 description: |
-  Interactive Terminal User Interface (TUI) & OpenTelemetry/Prometheus Exporter for Oracle RAC,
-  Restart, Single Instance, ASM, RMAN, Data Guard, Alert Log, and Linux Server/SAN Multipath.
+  Interactive Terminal User Interface (TUI), OpenTelemetry/Prometheus Exporter,
+  SRE/SLO Engine (Telegram & SMTP Alerts), Remote Action API, and Flutter Web Command Center
+  for Oracle RAC, Restart, Single Instance, ASM, RMAN, Data Guard, Alert Log, and Linux/SAN.
 vendor: "ora-tui"
 homepage: "https://github.com/mario-ezquerro/oratui"
 license: "Apache-2.0"
@@ -117,6 +118,20 @@ contents:
       mode: 0644
       owner: root
       group: root
+  - src: ./POC/flutter-web/Dockerfile
+    dst: /usr/share/ora-tui/POC/flutter-web/Dockerfile
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/flutter-web/nginx.conf
+    dst: /usr/share/ora-tui/POC/flutter-web/nginx.conf
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/flutter-web/build/web
+    dst: /usr/share/ora-tui/POC/flutter-web/build/web
   - src: ./POC/ansible/ansible.cfg
     dst: /usr/share/ora-tui/POC/ansible/ansible.cfg
     file_info:
@@ -137,6 +152,12 @@ contents:
       group: root
   - src: ./POC/ansible/templates/targets.yml.j2
     dst: /usr/share/ora-tui/POC/ansible/templates/targets.yml.j2
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/ansible/templates/servers.json.j2
+    dst: /usr/share/ora-tui/POC/ansible/templates/servers.json.j2
     file_info:
       mode: 0644
       owner: root

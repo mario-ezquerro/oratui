@@ -17,7 +17,7 @@ import (
 	"github.com/mario/ora-tui/internal/ui"
 )
 
-const AppVersion = "1.6.0"
+const AppVersion = "1.7.0"
 
 func main() {
 	mockFlag := flag.Bool("mock", false, "Force interactive mock/simulation mode with sample Oracle data")
@@ -38,7 +38,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("ora-tui v%s (MS-DOS Retro Themes + Server/SAN Health Checks + OpenTelemetry/Prometheus Exporter)\n", AppVersion)
+		fmt.Printf("ora-tui v%s (MS-DOS Retro Themes + Server/SAN Health + OpenTelemetry + SRE/SLO & Remote Action API)\n", AppVersion)
 		return
 	}
 
@@ -112,12 +112,14 @@ func main() {
 	runHeadless := *daemonFlag || (otelEnabled && !isTTY)
 
 	if runHeadless {
-		fmt.Printf("[ORA-TUI v%s] Daemon OpenTelemetry & Prometheus iniciado en %s (Host=%s, Modo=%s, Intervalo=%s)\n",
+		fmt.Printf("[ORA-TUI v%s] Daemon OpenTelemetry, SRE/SLO & Remote Action API iniciado en %s (Host=%s, Modo=%s, Intervalo=%s)\n",
 			AppVersion, listenAddr, state.HostName, state.Topology, intervalFlag.String())
 		fmt.Printf("[ORA-TUI v%s] Endpoints activos:\n", AppVersion)
 		fmt.Printf("  • Prometheus / OpenMetrics : http://%s/metrics\n", listenAddr)
 		fmt.Printf("  • OpenTelemetry OTLP JSON  : http://%s/otel/v1/metrics\n", listenAddr)
 		fmt.Printf("  • Snapshot Estado JSON     : http://%s/api/v1/state\n", listenAddr)
+		fmt.Printf("  • SRE, SLO & Telegram/SMTP : http://%s/api/v1/sre\n", listenAddr)
+		fmt.Printf("  • Ejecución Remota Acciones: http://%s/api/v1/action\n", listenAddr)
 
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)

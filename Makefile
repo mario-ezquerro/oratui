@@ -1,5 +1,5 @@
 BINARY_NAME=ora-tui
-VERSION=1.6.0
+VERSION=1.7.0
 
 .PHONY: all build build-linux test preview mock rpm deb packages clean
 
@@ -22,19 +22,21 @@ mock: build
 
 rpm: build-linux
 	mkdir -p dist
-	go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest pkg --packager rpm --config packaging/nfpm.yaml --target dist/$(BINARY_NAME)-1.6.0-1.x86_64.rpm
-	cp dist/$(BINARY_NAME)-1.6.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.5.0-1.x86_64.rpm
-	cp dist/$(BINARY_NAME)-1.6.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.4.0-1.x86_64.rpm
-	cp dist/$(BINARY_NAME)-1.6.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.3.0-1.x86_64.rpm
-	cp dist/$(BINARY_NAME)-1.6.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.0.0-1.x86_64.rpm
+	go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest pkg --packager rpm --config packaging/nfpm.yaml --target dist/$(BINARY_NAME)-1.7.0-1.x86_64.rpm
+	cp dist/$(BINARY_NAME)-1.7.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.6.0-1.x86_64.rpm
+	cp dist/$(BINARY_NAME)-1.7.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.5.0-1.x86_64.rpm
+	cp dist/$(BINARY_NAME)-1.7.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.4.0-1.x86_64.rpm
+	cp dist/$(BINARY_NAME)-1.7.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.3.0-1.x86_64.rpm
+	cp dist/$(BINARY_NAME)-1.7.0-1.x86_64.rpm dist/$(BINARY_NAME)-1.0.0-1.x86_64.rpm
 
 deb: build-linux
 	mkdir -p dist
-	go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest pkg --packager deb --config packaging/nfpm.yaml --target dist/$(BINARY_NAME)_1.6.0-1_amd64.deb
-	cp dist/$(BINARY_NAME)_1.6.0-1_amd64.deb dist/$(BINARY_NAME)_1.5.0-1_amd64.deb
-	cp dist/$(BINARY_NAME)_1.6.0-1_amd64.deb dist/$(BINARY_NAME)_1.4.0-1_amd64.deb
-	cp dist/$(BINARY_NAME)_1.6.0-1_amd64.deb dist/$(BINARY_NAME)_1.3.0-1_amd64.deb
-	cp dist/$(BINARY_NAME)_1.6.0-1_amd64.deb dist/$(BINARY_NAME)_1.0.0-1_amd64.deb
+	go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest pkg --packager deb --config packaging/nfpm.yaml --target dist/$(BINARY_NAME)_1.7.0-1_amd64.deb
+	cp dist/$(BINARY_NAME)_1.7.0-1_amd64.deb dist/$(BINARY_NAME)_1.6.0-1_amd64.deb
+	cp dist/$(BINARY_NAME)_1.7.0-1_amd64.deb dist/$(BINARY_NAME)_1.5.0-1_amd64.deb
+	cp dist/$(BINARY_NAME)_1.7.0-1_amd64.deb dist/$(BINARY_NAME)_1.4.0-1_amd64.deb
+	cp dist/$(BINARY_NAME)_1.7.0-1_amd64.deb dist/$(BINARY_NAME)_1.3.0-1_amd64.deb
+	cp dist/$(BINARY_NAME)_1.7.0-1_amd64.deb dist/$(BINARY_NAME)_1.0.0-1_amd64.deb
 
 packages: rpm deb
 

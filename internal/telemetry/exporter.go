@@ -18,14 +18,24 @@ import (
 // completely outside Oracle's port ranges 1521-1529, 5500, 8080, 4903).
 const DefaultOTelPort = 9161
 
-// Exporter serves thread-safe OpenTelemetry (OTLP JSON) and Prometheus/OpenMetrics (/metrics)
-// endpoints exposing 100% of the Oracle RAC, Database, ASM, RMAN, Alert Log, and Linux/SAN state.
+// Exporter serves thread-safe OpenTelemetry (OTLP JSON), Prometheus/OpenMetrics (/metrics),
+// SRE/SLO & Telegram/Email Alerting (/api/v1/sre), and Remote Remediation Actions (/api/v1/action).
 type Exporter struct {
-	mu          sync.RWMutex
-	state       model.EnvironmentState
-	lastUpdated time.Time
-	listenAddr  string
-	version     string
+	mu                  sync.RWMutex
+	state               model.EnvironmentState
+	lastUpdated         time.Time
+	listenAddr          string
+	version             string
+	history             []MetricHistoryPoint
+	sloConfig           SLOConfig
+	totalSamples        int
+	goodAvailSamples    int
+	goodLockFreeSamples int
+	goodStorageSamples  int
+	goodSANSamples      int
+	activeAlerts        []DelicateAlert
+	notifications       []NotificationEvent
+	alertLastSent       map[string]time.Time
 }
 
 func NewExporter(initial model.EnvironmentState, listenAddr, version string) *Exporter {
@@ -34,12 +44,17 @@ func NewExporter(initial model.EnvironmentState, listenAddr, version string) *Ex
 	} else if !strings.Contains(listenAddr, ":") {
 		listenAddr = ":" + listenAddr
 	}
-	return &Exporter{
-		state:       initial,
-		lastUpdated: time.Now(),
-		listenAddr:  listenAddr,
-		version:     version,
+	now := time.Now()
+	exp := &Exporter{
+		state:         initial,
+		lastUpdated:   now,
+		listenAddr:    listenAddr,
+		version:       version,
+		sloConfig:     defaultSLOConfig(),
+		alertLastSent: make(map[string]time.Time),
 	}
+	exp.recordStateAndEvaluateSRE(initial, now)
+	return exp
 }
 
 func (e *Exporter) ListenAddr() string {
@@ -47,9 +62,11 @@ func (e *Exporter) ListenAddr() string {
 }
 
 func (e *Exporter) UpdateState(s model.EnvironmentState) {
+	now := time.Now()
 	e.mu.Lock()
 	e.state = s
-	e.lastUpdated = time.Now()
+	e.lastUpdated = now
+	e.recordStateAndEvaluateSRE(s, now)
 	e.mu.Unlock()
 }
 
@@ -65,7 +82,14 @@ func (e *Exporter) Start() (*http.Server, error) {
 	mux.HandleFunc("/metrics", e.handlePrometheusMetrics)
 	mux.HandleFunc("/otel/v1/metrics", e.handleOTelJSONMetrics)
 	mux.HandleFunc("/api/v1/state", e.handleStateJSON)
+	mux.HandleFunc("/api/v1/sre", e.handleSREGetOrPost)
+	mux.HandleFunc("/api/v1/sre/config", e.handleSREConfigUpdate)
+	mux.HandleFunc("/api/v1/sre/notify", e.handleSRENotifyNow)
+	mux.HandleFunc("/api/v1/action", e.handleExecuteAction)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if enableCORS(w, r) {
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK\n"))
 	})
@@ -84,13 +108,16 @@ func (e *Exporter) Start() (*http.Server, error) {
 }
 
 func (e *Exporter) handleIndexPage(w http.ResponseWriter, r *http.Request) {
+	if enableCORS(w, r) {
+		return
+	}
 	st, updated := e.Snapshot()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>ORA-TUI OpenTelemetry &amp; Prometheus Exporter</title>
+  <title>ORA-TUI OpenTelemetry, SRE &amp; Control API</title>
   <style>
     body { background: #0000af; color: #ffffff; font-family: monospace; padding: 24px; }
     .box { border: 3px double #5fffff; padding: 20px; max-width: 900px; background: #000080; }
@@ -102,13 +129,15 @@ func (e *Exporter) handleIndexPage(w http.ResponseWriter, r *http.Request) {
 </head>
 <body>
   <div class="box">
-    <h1>══ ORA-TUI %s :: OpenTelemetry &amp; Prometheus Exporter ══</h1>
+    <h1>══ ORA-TUI %s :: OpenTelemetry, SRE/SLO &amp; Remote Actions API ══</h1>
     <p><span class="badge">%s</span> <b>Host:</b> %s │ <b>Cluster:</b> %s │ <b>Oracle Ver:</b> %s │ <b>Last Scrape:</b> %s</p>
     <hr style="border-color:#5fffff">
     <ul>
-      <li><a href="/metrics">/metrics</a> — Formato <b>Prometheus / OpenMetrics</b> (todas las métricas de Cluster, BD, Tablespaces, Sesiones, Locks, ASM, Listeners, RMAN, Data Guard, Alert Log ORA-, Memoria, Inodos y Multipath SAN)</li>
+      <li><a href="/metrics">/metrics</a> — Formato <b>Prometheus / OpenMetrics</b> (52 métricas)</li>
       <li><a href="/otel/v1/metrics">/otel/v1/metrics</a> — Formato <b>OpenTelemetry OTLP JSON (resourceMetrics)</b></li>
-      <li><a href="/api/v1/state">/api/v1/state</a> — Snapshot completo del estado en <b>JSON</b></li>
+      <li><a href="/api/v1/state">/api/v1/state</a> — Snapshot completo del estado + historial temporal + SRE/SLO en <b>JSON</b> (para Flutter Web)</li>
+      <li><a href="/api/v1/sre">/api/v1/sre</a> — Estado de <b>Objetivos SLO, Error Budget, Alertas Críticas y Canales Telegram/Email</b></li>
+      <li><b>POST /api/v1/action</b> — Ejecución remota de acciones DBA y Linux/SAN con salida completa en tiempo real</li>
       <li><a href="/healthz">/healthz</a> — Healthcheck HTTP 200 OK</li>
     </ul>
   </div>
@@ -117,12 +146,29 @@ func (e *Exporter) handleIndexPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *Exporter) handleStateJSON(w http.ResponseWriter, r *http.Request) {
-	st, updated := e.Snapshot()
+	if enableCORS(w, r) {
+		return
+	}
+	e.mu.RLock()
+	st := e.state
+	updated := e.lastUpdated
+	cfg := e.sloConfig
+	slos := computeSLOs(e.totalSamples, e.goodAvailSamples, e.goodLockFreeSamples, e.goodStorageSamples, e.goodSANSamples, cfg)
+	alerts := append([]DelicateAlert(nil), e.activeAlerts...)
+	hist := append([]MetricHistoryPoint(nil), e.history...)
+	notifs := append([]NotificationEvent(nil), e.notifications...)
+	e.mu.RUnlock()
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	payload := map[string]interface{}{
-		"version":      e.version,
-		"last_updated": updated.Format(time.RFC3339),
-		"state":        st,
+		"version":       e.version,
+		"last_updated":  updated.Format(time.RFC3339),
+		"state":         st,
+		"slos":          slos,
+		"active_alerts": alerts,
+		"history":       hist,
+		"sre_config":    cfg,
+		"notifications": notifs,
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -130,6 +176,9 @@ func (e *Exporter) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *Exporter) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request) {
+	if enableCORS(w, r) {
+		return
+	}
 	st, updated := e.Snapshot()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	_, _ = w.Write([]byte(RenderPrometheusMetrics(st, updated, e.version)))

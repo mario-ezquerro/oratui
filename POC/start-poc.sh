@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-mkdir -p prometheus
+mkdir -p prometheus flutter-web/build/web flutter-web/web
 
 DEFAULT_HOST="servidor-oracle.local"
 DEFAULT_PORT="9161"
@@ -21,6 +21,7 @@ fi
 
 echo "=========================================================================="
 echo "  CONFIGURACIÓN INTERACTIVA MULTI-SERVIDOR POC ORA-TUI"
+echo "  (Flutter Web Control & SRE Center + Prometheus + Grafana)"
 echo "=========================================================================="
 echo ""
 echo "Servidores configurados actualmente en prometheus/targets.yml:"
@@ -34,7 +35,7 @@ echo "Modos de configuración:"
 echo "  [1] Añadir o configurar un servidor Oracle interactivamente (por defecto)"
 echo "  [2] Reemplazar toda la lista con un único servidor Oracle"
 echo "  [3] Sincronizar la lista de servidores desde el inventario Ansible (ansible/inventory.ini)"
-echo "  [4] Ejecutar el playbook completo de Ansible (instalar daemons + actualizar Prometheus/Grafana)"
+echo "  [4] Ejecutar el playbook completo de Ansible (instalar daemons + actualizar contenedores)"
 read -r -p "👉 Selecciona una opción [1]: " MODE_CHOICE
 MODE_CHOICE="${MODE_CHOICE:-1}"
 
@@ -78,6 +79,7 @@ else
 ORACLE_TARGET=${TARGET}
 PROMETHEUS_PORT=9090
 GRAFANA_PORT=3000
+FLUTTER_WEB_PORT=8088
 GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=admin
 EOF
@@ -121,12 +123,42 @@ EOF
   fi
 fi
 
+# Sincronizar automáticamente flutter-web/build/web/servers.json desde prometheus/targets.yml
+if [[ -f prometheus/targets.yml ]]; then
+  awk '
+    BEGIN {
+      print "{\n  \"default_port\": 9161,\n  \"servers\": ["
+      count = 0
+    }
+    /- "[0-9a-zA-Z._-]+:[0-9]+"/ {
+      gsub(/.*- "/, ""); gsub(/".*/, "");
+      target = $0
+    }
+    /oracle_host:/ {
+      gsub(/.*oracle_host: "/, ""); gsub(/".*/, "");
+      host = $0
+    }
+    /env:/ {
+      gsub(/.*env: "/, ""); gsub(/".*/, "");
+      env = $0
+      if (count > 0) printf ",\n"
+      printf "    {\n      \"name\": \"%s (%s)\",\n      \"url\": \"http://%s\",\n      \"environment\": \"%s\",\n      \"site\": \"oracle-fleet\"\n    }", host, target, target, env
+      count++
+    }
+    END {
+      print "\n  ]\n}"
+    }
+  ' prometheus/targets.yml > flutter-web/build/web/servers.json
+  cp flutter-web/build/web/servers.json flutter-web/web/servers.json 2>/dev/null || true
+  echo ">>> Catálogo multi-servidor de Flutter Web (servers.json) sincronizado."
+fi
+
 echo ""
-echo ">>> Levantando / asegurando contenedores Docker (Prometheus + Grafana)..."
+echo ">>> Levantando contenedores Docker (Flutter Web Command & SRE Center + Prometheus + Grafana)..."
 if docker compose version >/dev/null 2>&1; then
-  docker compose up -d
+  docker compose up -d --build
 elif command -v docker-compose >/dev/null 2>&1; then
-  docker-compose up -d
+  docker-compose up -d --build
 else
   echo "[ERROR] No se encontró 'docker compose' ni 'docker-compose' en este servidor."
   exit 1
@@ -141,9 +173,11 @@ echo ""
 echo "=========================================================================="
 echo "  ✅ POC MULTI-SERVIDOR ORA-TUI ACTIVA"
 echo "=========================================================================="
-echo "  • Grafana (01. Vista Global Flota)    : http://${SERVER_IP}:3000"
-echo "  • Grafana (02. Detalle 26 Paneles)    : http://${SERVER_IP}:3000/d/oratui-full-observability-poc"
+echo "  • 🚀 Flutter Web Command & SRE Center : http://${SERVER_IP}:8088"
+echo "    (Gráficas en vivo + Ejecución Remota SQL/RMAN/OS + SLOs + Telegram/Email)"
+echo "  • 📊 Grafana (01. Vista Global Flota) : http://${SERVER_IP}:3000"
+echo "  • 📊 Grafana (02. Detalle 26 Paneles) : http://${SERVER_IP}:3000/d/oratui-full-observability-poc"
 echo "    Usuario / Contraseña                : admin / admin"
-echo "  • Prometheus (Targets Dinámicos)      : http://${SERVER_IP}:9090/targets"
-echo "  • Prometheus (15 Alertas)             : http://${SERVER_IP}:9090/alerts"
+echo "  • 🔥 Prometheus (Targets Dinámicos)   : http://${SERVER_IP}:9090/targets"
+echo "  • 🚨 Prometheus (15 Alertas)          : http://${SERVER_IP}:9090/alerts"
 echo "=========================================================================="

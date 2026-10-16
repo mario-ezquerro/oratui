@@ -1,0 +1,18 @@
+{
+  "default_port": 9161,
+  "servers": [
+{% for host in groups['oracle_servers'] %}
+{% set target_ip = hostvars[host]['ansible_host'] | default(host) %}
+{% set target_port = hostvars[host]['otel_port'] | default(default_otel_port | default(9161)) %}
+{% set target_env = hostvars[host]['env'] | default('PROD') %}
+{% set target_cluster = hostvars[host]['cluster_label'] | default('oracle-db') %}
+    {
+      "name": "{{ host }} ({{ target_ip }}:{{ target_port }})",
+      "url": "http://{{ target_ip }}:{{ target_port }}",
+      "environment": "{{ target_env }}",
+      "site": "{{ target_cluster }}"
+    }{% if not loop.last %},{% endif %}
+
+{% endfor %}
+  ]
+}

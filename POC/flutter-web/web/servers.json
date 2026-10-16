@@ -1,0 +1,17 @@
+{
+  "default_port": 9161,
+  "servers": [
+    {
+      "name": "servidor-oracle.local (Principal)",
+      "url": "http://servidor-oracle.local:9161",
+      "environment": "desarrollo",
+      "site": "cpd-madrid"
+    },
+    {
+      "name": "Localhost / Mock Demo (:9161)",
+      "url": "http://localhost:9161",
+      "environment": "local-demo",
+      "site": "local"
+    }
+  ]
+}

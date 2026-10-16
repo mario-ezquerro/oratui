@@ -38,6 +38,18 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_poc_data:/var/lib/grafana
 
+  oratui-web:
+    build:
+      context: ./flutter-web
+      dockerfile: Dockerfile
+    image: oratui-flutter-web:latest
+    container_name: oratui-poc-flutter-web
+    restart: unless-stopped
+    ports:
+      - "${FLUTTER_WEB_PORT:-8088}:80"
+    volumes:
+      - ./flutter-web/build/web/servers.json:/usr/share/nginx/html/servers.json:ro
+
 volumes:
   prometheus_poc_data:
   grafana_poc_data:

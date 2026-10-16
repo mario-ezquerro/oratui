@@ -179,7 +179,7 @@
     target_dir: "{{ poc_install_dir | default('/opt/oratui-poc') }}"
 
   tasks:
-    - name: Crear estructura de directorios para Prometheus y Grafana en {{ target_dir }}
+    - name: Crear estructura de directorios para Prometheus, Grafana y Flutter Web en {{ target_dir }}
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -190,8 +190,9 @@
         - "{{ target_dir }}/grafana/provisioning/datasources"
         - "{{ target_dir }}/grafana/provisioning/dashboards"
         - "{{ target_dir }}/grafana/dashboards"
+        - "{{ target_dir }}/flutter-web/build/web"
 
-    - name: Copiar ficheros base de la POC (docker-compose.yml, alertas y dashboards de Grafana)
+    - name: Copiar ficheros base de la POC (docker-compose.yml, alertas, dashboards de Grafana y Flutter Web)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../{{ item.src }}"
         dest: "{{ target_dir }}/{{ item.dest }}"
@@ -205,11 +206,20 @@
         - { src: "grafana/provisioning/dashboards/dashboard.yml", dest: "grafana/provisioning/dashboards/dashboard.yml" }
         - { src: "grafana/dashboards/oratui_fleet_overview.json", dest: "grafana/dashboards/oratui_fleet_overview.json" }
         - { src: "grafana/dashboards/oratui_full_poc_dashboard.json", dest: "grafana/dashboards/oratui_full_poc_dashboard.json" }
+        - { src: "flutter-web/Dockerfile", dest: "flutter-web/Dockerfile" }
+        - { src: "flutter-web/nginx.conf", dest: "flutter-web/nginx.conf" }
+        - { src: "flutter-web/build/web/", dest: "flutter-web/build/web/" }
 
     - name: Generar dinámicamente prometheus/targets.yml con todos los servidores de [oracle_servers]
       ansible.builtin.template:
         src: "{{ playbook_dir }}/templates/targets.yml.j2"
         dest: "{{ target_dir }}/prometheus/targets.yml"
+        mode: "0644"
+
+    - name: Generar dinámicamente flutter-web/build/web/servers.json con todos los servidores de [oracle_servers]
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/templates/servers.json.j2"
+        dest: "{{ target_dir }}/flutter-web/build/web/servers.json"
         mode: "0644"
 
     - name: Comprobar si Docker está instalado en el servidor de monitorización
@@ -238,24 +248,25 @@
         - docker_check.rc != 0
         - ansible_os_family == "Debian"
 
-    - name: Levantar / Actualizar contenedores de Prometheus y Grafana con Docker Compose
+    - name: Levantar / Actualizar contenedores de Flutter Web, Prometheus y Grafana con Docker Compose
       ansible.builtin.shell: |
         cd "{{ target_dir }}"
         if docker compose version >/dev/null 2>&1; then
-          docker compose up -d
+          docker compose up -d --build
         else
-          docker-compose up -d
+          docker-compose up -d --build
         fi
       register: compose_up
       changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr or 'Recreated' in compose_up.stderr"
 
-    - name: Mostrar resumen de acceso a Grafana y Prometheus Multi-Servidor
+    - name: Mostrar resumen de acceso a Flutter Web Command & SRE Center, Grafana y Prometheus
       ansible.builtin.debug:
         msg:
           - "=========================================================================="
           - "  STACK MULTI-SERVIDOR ORA-TUI DESPLEGADO CORRECTAMENTE"
           - "=========================================================================="
           - "  Servidores Oracle monitorizados ({{ groups['oracle_servers'] | length }}): {{ groups['oracle_servers'] | join(', ') }}"
+          - "  Flutter Web Command & SRE Center (Gráficas + Acciones + Telegram/SMTP): http://{{ ansible_host | default(inventory_hostname) }}:8088"
           - "  Grafana (Vista Global Flota + Detalle 26 Paneles): http://{{ ansible_host | default(inventory_hostname) }}:3000 (admin / admin)"
           - "  Prometheus (Targets Auto-Descubiertos):            http://{{ ansible_host | default(inventory_hostname) }}:9090/targets"
           - "  Prometheus (15 Reglas de Alarma):                  http://{{ ansible_host | default(inventory_hostname) }}:9090/alerts"

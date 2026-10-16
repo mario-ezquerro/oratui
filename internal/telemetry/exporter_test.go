@@ -60,3 +60,34 @@ func TestRenderPrometheusAndOTelMetrics(t *testing.T) {
 		t.Fatalf("expected valid OTLP JSON resourceMetrics payload, got: %s", rec.Body.String())
 	}
 }
+
+func TestSRESLOAndRemoteActions(t *testing.T) {
+	st := *collector.NewMockState(model.ModeRAC)
+	exp := NewExporter(st, ":9161", "1.7.0")
+
+	// 1. Test /api/v1/sre
+	sreReq := httptest.NewRequest(http.MethodGet, "/api/v1/sre", nil)
+	sreRec := httptest.NewRecorder()
+	exp.handleSREGetOrPost(sreRec, sreReq)
+	if sreRec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 from /api/v1/sre, got %d", sreRec.Code)
+	}
+	body := sreRec.Body.String()
+	for _, field := range []string{`"slos"`, `"active_alerts"`, `"history"`, `"availability_target_pct"`, `"slo_availability"`} {
+		if !strings.Contains(body, field) {
+			t.Fatalf("expected /api/v1/sre response to contain %q, got:\n%s", field, body)
+		}
+	}
+
+	// 2. Test /api/v1/action (mock execution)
+	actReq := httptest.NewRequest(http.MethodPost, "/api/v1/action", strings.NewReader(`{"action":"kill_session","target":"512,9931,@2"}`))
+	actRec := httptest.NewRecorder()
+	exp.handleExecuteAction(actRec, actReq)
+	if actRec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 from /api/v1/action, got %d", actRec.Code)
+	}
+	if !strings.Contains(actRec.Body.String(), `"System altered."`) {
+		t.Fatalf("expected /api/v1/action response to contain 'System altered.', got:\n%s", actRec.Body.String())
+	}
+}
+
