@@ -4,6 +4,7 @@ datasources:
   - name: Prometheus-OraTUI
     type: prometheus
     access: proxy
+    orgId: 1
     uid: prometheus-oratui
     url: http://prometheus:9090
     isDefault: true
