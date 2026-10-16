@@ -1,57 +1,31 @@
-# Technical Specification: `ora-tui` (Oracle Cluster & Single Instance TUI Manager)
+# Technical Specification: `ora-tui` v1.6.0 (Oracle Cluster, DB, Server/SAN & OpenTelemetry Manager)
 
 ## 1. Project Overview
-Develop an interactive Terminal User Interface (TUI) application in **Go (Golang)** targeting Linux servers (RHEL / Oracle Linux 7, 8, and 9), packaged as a zero-dependency RPM installable via `dnf` (and runnable in `--mock` mode on macOS/Linux for simulation and design testing).
+`ora-tui` is an interactive Terminal User Interface (TUI) and embedded **OpenTelemetry / Prometheus Exporter** written in **Go (Golang)** targeting Linux database servers (RHEL / Oracle Linux 7, 8, and 9, as well as Debian/Ubuntu), packaged as a zero-dependency `.rpm` and `.deb` (`CGO_ENABLED=0`) and runnable in `--mock` mode on macOS/Linux.
 
-The tool automatically discovers Oracle environments (**Single Instance**, **Oracle Restart**, or **Oracle RAC**), provides a real-time comprehensive health and analysis dashboard of the entire stack (Cluster, Databases/PDBs, Connected Users/Sessions, Tablespaces, Tables/Segments, ASM Storage, Listeners, RMAN Backups, Flashback/Restore Points, Data Guard, and Alert Log `ORA-` Errors), and executes safe operational and maintenance workflows navigated entirely via **arrow keys** and **Unicode Box-Drawing Windows**:
-* **Borde Simple (`┌`, `┐`, `└`, `┘`, `─`, `│`, `├`, `┤`, `┬`, `┴`, `┼`)** for standard containers, sub-panels, and data tables.
-* **Borde Doble (`╔`, `╗`, `╚`, `╝`, `═`, `║`, `╠`, `╣`, `╦`, `╩`, `╬`)** for the main header, focused active windows, interactive popup action menus, and security confirmation modals (with live toggle via key `b` between Mixed `┌─┐/╔═╗`, Full Double `╔═╗`, Full Single `┌─┐`, and Classic ASCII `+-|`).
+The tool automatically discovers Oracle environments (**Single Instance**, **Oracle Restart**, or **Oracle RAC**), provides a real-time 9-module health and analysis dashboard (Cluster, Databases/PDBs, Connected Users/Sessions, Tablespaces, Tables/Segments, ASM Storage, Listeners, RMAN Backups, Flashback/Restore Points, Data Guard, Alert Log `ORA-` Errors, and **Linux Server/Memory/Filesystem Inodes/SAN Multipath & FC HBAs**), and executes operational and maintenance workflows with a **scrollable popup Operation Output Window** showing complete command results.
 
-## 2. Technical Constraints & Environment
-* **Language:** Go 1.22+ compiled as a static binary (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64`).
-* **TUI Framework:** `github.com/rivo/tview` + `github.com/gdamore/tcell/v2` with custom Unicode Box-Drawing themes (`┌─┐│└┘` and `╔═╗║╚╝`).
-* **Packaging:** RPM package built via `nfpm` or `rpmbuild`, installable via `dnf install ora-tui`.
-* **OS Privilege Management:** The binary runs with `root` privileges (via `sudo`) and dynamically switches execution context (`syscall.Credential` / `sudo -u <owner>`) based on the file owner of `$ORACLE_HOME` (typically `oracle`) or `$GRID_HOME` (typically `grid`), reserving `root` execution strictly for clusterware stack commands (`crsctl start/stop crs`).
-* **Simulation / Mock Mode (`--mock`):** Built-in interactive simulator supporting `--mock` (and `--topology=rac|restart|single`) to preview all screens, simulated metrics, arrow-key menus, and maintenance workflows without requiring a live Oracle installation.
-
-## 3. Repository Structure
-```text
-ora-tui/
-├── .agent/
-│   └── skills/
-│       └── oracle-tui/
-│           └── SKILL.md         # Antigravity agent skill instructions
-├── cmd/
-│   └── ora-tui/
-│       └── main.go              # Entrypoint, CLI flags (--mock, --topology, --preview), TUI bootstrap
-├── internal/
-│   ├── model/
-│   │   └── state.go             # Domain models: Cluster, Instance, PDB, Session, Tablespace, TableSegment, ASM, Listener, RMAN, AlertLog
-│   ├── discovery/
-│   │   ├── detector.go          # Parses /etc/oratab, ocr.loc, olr.loc, and /proc PMON processes
-│   │   └── version.go           # Extracts exact version (sqlplus -V, crsctl query crs activeversion)
-│   ├── collector/
-│   │   ├── cluster.go           # crsctl status resource -t, olsnodes, crsctl check cluster -all
-│   │   ├── database.go          # srvctl status, sqlplus queries (gv$instance, gv$pdbs, Data Guard, FRA)
-│   │   ├── sessions.go          # Connected users & sessions (gv$session, blocking locks, wait events, SQL_ID)
-│   │   ├── storage.go           # ASM diskgroups (v$asm_diskgroup), Tablespaces (dba_tablespaces), Datafiles, Top Tables/Segments
-│   │   ├── rman_diag.go         # RMAN backup jobs (v$rman_backup_job_details), Restore Points (v$restore_point), Alert Log (v$diag_alert_ext)
-│   │   ├── network.go           # Local Listeners and SCAN Listeners status
-│   │   └── mock.go              # Realistic mock data generator for RAC / Restart / Single Instance
-│   ├── actions/
-│   │   ├── single.go            # Start/Stop via sqlplus (SHUTDOWN IMMEDIATE / STARTUP) and lsnrctl
-│   │   ├── rac.go               # Start/Stop via srvctl (instances, databases, services)
-│   │   ├── node_drain.go        # Graceful node eviction/drain and re-joining workflow
-│   │   └── maintenance.go       # Tablespace resize/add datafile, table stats/shrink/index rebuild, compile invalid objects, kill session, RMAN/GRP, ADRCI
-│   ├── executor/
-│   │   └── runner.go            # OS command & SQL*Plus runner with UID switching, timeouts, and live output streaming
-│   └── ui/
-│       ├── ascii.go             # Unicode Simple (┌─┐) & Double (╔═╗) border themes and block progress bars [████████░░]
-│       ├── app.go               # Main tview layout, 8 views, arrow-key menus, and double-bordered modal popups
-│       └── preview.go           # Static UTF-8 box-drawing screen renderer for CLI preview
-├── packaging/
-│   ├── nfpm.yaml                # Automated RPM generator config
-│   ├── ora-tui.spec             # Standard RPM .spec file for rpmbuild
-│   └── sudoers.ora-tui          # Sudoers rules for dba/oinstall groups
-└── SPEC.md
-```
+## 2. Key Capabilities
+1. **Zero-Config Discovery (`internal/discovery`)**:
+   - Inspects `/etc/oracle/ocr.loc`, `/etc/oracle/olr.loc`, `/etc/oratab`, `inventory.xml`, and `/proc/[0-9]*/cmdline` (`ora_pmon_*`, `db_pmon_*`, `asm_pmon_*`) to detect topology, active instances, `$ORACLE_HOME`, `$GRID_HOME`, and exact RU patch level.
+2. **Dynamic UNIX Privilege Switching (`internal/executor`)**:
+   - Detects UID/GID ownership of `$ORACLE_HOME` (`oracle`) and `$GRID_HOME` (`grid`) via `os.Stat` and runs child processes under the appropriate OS account, reserving `root` strictly for `crsctl start/stop crs` and SCSI/Multipath bus rescans.
+3. **9 Interactive Analysis & Maintenance Modules (`internal/collector`, `internal/actions`, `internal/ui`)**:
+   - Module 1: Clusterware (`olsnodes`, `crsctl`), Database Instances (`gv$instance`), PDBs (`gv$pdbs`), and Services + Graceful Node Drain.
+   - Module 2: Active/Inactive Sessions (`gv$session`), Wait Events, PGA Memory, and TX/TM Blocking Lock Chains + `KILL SESSION` & `DBMS_XPLAN`.
+   - Module 3: Tablespaces & Datafiles (`dba_tablespaces`, `dba_data_files`) with real `AUTOEXTEND MAXBYTES` capacity calculation.
+   - Module 4: Top Table/Index Segments (`dba_segments`) & `INVALID` Objects (`dba_objects`) + `DBMS_STATS`, Online Shrink, Index Rebuild, and `UTL_RECOMP`.
+   - Module 5: ASM Diskgroups (`v$asm_diskgroup`) & Local/SCAN Listeners (`lsnrctl status` `READY` vs `UNKNOWN` handlers).
+   - Module 6: RMAN Backups (`v$rman_backup_job_details`), Flashback Restore Points (`v$restore_point`), and Data Guard Standby (`MRP0`, Transport/Apply Lag).
+   - Module 7: Strict `^ORA-` Alert Log Collector & Live Tail Viewer + ADRCI purge and log rotation.
+   - Module 8: Linux Server Health (`Load Average` vs CPU Cores, Physical RAM, Swap, Static `HugePages`, `Transparent HugePages [never]`, Kernel Async I/O `fs.aio-nr`, File Descriptors `fs.file-nr`), Filesystem Space & Inode Exhaustion (`df -PTm` & `df -Pi` to prevent `ORA-09925`), and SAN Multipath (`multipath -ll` active vs faulty paths, Fibre Channel HBA ports `/sys/class/fc_host/host*`, and Block Disks).
+   - Module 9: Centralized Guided Maintenance Wizard Catalog.
+4. **Popup Operation Output Modal (`showOperationOutputModal`)**:
+   - Displays full multi-line command outputs in a centered, scrollable modal window whenever any diagnostic or maintenance task is executed.
+5. **4 Authentic Retro MS-DOS Color Themes (`c` key) & Unicode Box-Drawing Modes (`b` key)**:
+   - *Norton Commander 5.0*, *Borland Turbo C++ 3.0*, *IBM 5151 Green Phosphor CRT* (with 100% full-line inverse video selection bar), and *Modern Dark*.
+6. **Embedded OpenTelemetry (`OTLP JSON`) & Prometheus (`/metrics`) Exporter (`internal/telemetry`)**:
+   - Activated via `--opentelemetry` (or `--opentlemetry` / `--otel`), listening on port `9161` by default (`--otel-port`), in hybrid TUI+Exporter mode or headless `--daemon` mode (`ora-tui-otel.service`).
+   - Exposes 52 Prometheus metrics on `/metrics`, OTLP/HTTP JSON on `/otel/v1/metrics`, full state JSON on `/api/v1/state`, and healthcheck on `/healthz`.
+7. **Ready-to-Run Docker `POC/` Stack (`POC/configure-poc.sh`)**:
+   - Self-contained `POC/` folder with an interactive setup script (`./configure-poc.sh`) that prompts for the target Oracle hostname/IP every time it runs, configures Prometheus with 15 alert rules, and auto-provisions Grafana with a 26-panel full observability home dashboard.

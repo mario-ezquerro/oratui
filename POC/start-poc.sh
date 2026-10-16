@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Leer el último target guardado en .env si existe
-DEFAULT_HOST="srv-dbgriar-des"
+DEFAULT_HOST="servidor-oracle.local"
 DEFAULT_PORT="9161"
 if [[ -f .env ]]; then
   SAVED_TARGET=$(grep -E '^ORACLE_TARGET=' .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" || true)
@@ -21,7 +21,7 @@ echo "  CONFIGURACIÓN DE LA POC ORA-TUI (PROMETHEUS + GRAFANA)"
 echo "=========================================================================="
 echo ""
 
-# Pedir siempre el nombre o IP del host a monitorizar
+# Pedir siempre el nombre o IP del host a monitorizar cada vez que se ejecuta el script
 read -r -p "👉 Introduce el nombre o IP del host Oracle a monitorizar [${DEFAULT_HOST}]: " INPUT_HOST
 TARGET_HOST="${INPUT_HOST:-$DEFAULT_HOST}"
 
@@ -110,5 +110,5 @@ echo "  • Host Oracle Monitorizado : ${TARGET}"
 echo "  • Grafana (Dashboard POC)  : http://${SERVER_IP}:3000"
 echo "    Usuario / Contraseña     : admin / admin"
 echo "  • Prometheus (Targets)     : http://${SERVER_IP}:9090/targets"
-echo "  • Prometheus (14 Alertas)  : http://${SERVER_IP}:9090/alerts"
+echo "  • Prometheus (15 Alertas)  : http://${SERVER_IP}:9090/alerts"
 echo "=========================================================================="

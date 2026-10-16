@@ -7,7 +7,7 @@ Esta carpeta **`POC/`** está lista para copiarse en **cualquier servidor con Do
 
 ---
 
-## 🛠️ Paso 1: En el Servidor Oracle a Monitorizar (ej. `srv-dbgriar-des`)
+## 🛠️ Paso 1: En el Servidor Oracle a Monitorizar (ej. `servidor-oracle.local`)
 
 Asegúrate de tener arrancado el colector `ora-tui` en modo demonio OpenTelemetry/Prometheus (puerto `9161`):
 
@@ -58,12 +58,12 @@ sudo firewall-cmd --reload
      CONFIGURACIÓN DE LA POC ORA-TUI (PROMETHEUS + GRAFANA)
    ==========================================================================
 
-   👉 Introduce el nombre o IP del host Oracle a monitorizar [srv-dbgriar-des]: srv-dbgriar-des
+   👉 Introduce el nombre o IP del host Oracle a monitorizar [servidor-oracle.local]: 192.168.1.50
    👉 Introduce el puerto OpenTelemetry de ora-tui [9161]: 9161
 
-   >>> Generando configuración de Prometheus para monitorizar: srv-dbgriar-des:9161 ...
-   >>> Verificando conexión con http://srv-dbgriar-des:9161/healthz ...
-       [OK] Conexión exitosa con ora-tui en srv-dbgriar-des:9161.
+   >>> Generando configuración de Prometheus para monitorizar: 192.168.1.50:9161 ...
+   >>> Verificando conexión con http://192.168.1.50:9161/healthz ...
+       [OK] Conexión exitosa con ora-tui en 192.168.1.50:9161.
    >>> Levantando / recargando contenedores Docker (Prometheus + Grafana)...
    ```
 
