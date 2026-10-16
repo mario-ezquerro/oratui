@@ -1,7 +1,7 @@
 name: "ora-tui"
 arch: "amd64"
 platform: "linux"
-version: "1.7.0"
+version: "1.8.0"
 release: "1"
 section: "database"
 priority: "optional"
@@ -128,6 +128,12 @@ contents:
     dst: /usr/share/ora-tui/POC/flutter-web/nginx.conf
     file_info:
       mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/flutter-web/docker-entrypoint.sh
+    dst: /usr/share/ora-tui/POC/flutter-web/docker-entrypoint.sh
+    file_info:
+      mode: 0755
       owner: root
       group: root
   - src: ./POC/flutter-web/build/web

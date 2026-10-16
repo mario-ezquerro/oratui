@@ -89,5 +89,31 @@ func TestSRESLOAndRemoteActions(t *testing.T) {
 	if !strings.Contains(actRec.Body.String(), `"System altered."`) {
 		t.Fatalf("expected /api/v1/action response to contain 'System altered.', got:\n%s", actRec.Body.String())
 	}
+
+	// 3. Test anti-injection validation on /api/v1/action
+	injReq := httptest.NewRequest(http.MethodPost, "/api/v1/action", strings.NewReader(`{"action":"add_datafile","target":"USERS; DROP DATABASE"}`))
+	injRec := httptest.NewRecorder()
+	exp.handleExecuteAction(injRec, injReq)
+	if injRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected HTTP 400 for SQL injection attempt on /api/v1/action, got %d", injRec.Code)
+	}
+
+	// 4. Test Basic Auth / Token enforcement when SetSecurityConfig is enabled
+	exp.SetSecurityConfig("super-secret-token", "", "")
+	unauthReq := httptest.NewRequest(http.MethodPost, "/api/v1/action", strings.NewReader(`{"action":"switch_logfile"}`))
+	unauthRec := httptest.NewRecorder()
+	exp.handleExecuteAction(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected HTTP 401 for unauthenticated request when token is required, got %d", unauthRec.Code)
+	}
+
+	// Valid Basic Auth (admin:admin default)
+	basicReq := httptest.NewRequest(http.MethodPost, "/api/v1/action", strings.NewReader(`{"action":"switch_logfile"}`))
+	basicReq.SetBasicAuth("admin", "admin")
+	basicRec := httptest.NewRecorder()
+	exp.handleExecuteAction(basicRec, basicReq)
+	if basicRec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 with valid Basic Auth (admin:admin), got %d", basicRec.Code)
+	}
 }
 

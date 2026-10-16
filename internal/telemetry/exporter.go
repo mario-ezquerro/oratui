@@ -36,6 +36,9 @@ type Exporter struct {
 	activeAlerts        []DelicateAlert
 	notifications       []NotificationEvent
 	alertLastSent       map[string]time.Time
+	apiToken            string
+	tlsCertFile         string
+	tlsKeyFile          string
 }
 
 func NewExporter(initial model.EnvironmentState, listenAddr, version string) *Exporter {
@@ -52,9 +55,20 @@ func NewExporter(initial model.EnvironmentState, listenAddr, version string) *Ex
 		version:       version,
 		sloConfig:     defaultSLOConfig(),
 		alertLastSent: make(map[string]time.Time),
+		apiToken:      defaultAPIToken(),
 	}
 	exp.recordStateAndEvaluateSRE(initial, now)
 	return exp
+}
+
+func (e *Exporter) SetSecurityConfig(apiToken, certFile, keyFile string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if strings.TrimSpace(apiToken) != "" {
+		e.apiToken = strings.TrimSpace(apiToken)
+	}
+	e.tlsCertFile = strings.TrimSpace(certFile)
+	e.tlsKeyFile = strings.TrimSpace(keyFile)
 }
 
 func (e *Exporter) ListenAddr() string {
@@ -76,7 +90,7 @@ func (e *Exporter) Snapshot() (model.EnvironmentState, time.Time) {
 	return e.state, e.lastUpdated
 }
 
-// Start launches the HTTP server in a background goroutine.
+// Start launches the HTTP (or HTTPS if TLS cert/key configured) server in a background goroutine.
 func (e *Exporter) Start() (*http.Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", e.handlePrometheusMetrics)
@@ -101,8 +115,16 @@ func (e *Exporter) Start() (*http.Server, error) {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	e.mu.RLock()
+	certFile, keyFile := e.tlsCertFile, e.tlsKeyFile
+	e.mu.RUnlock()
+
 	go func() {
-		_ = srv.ListenAndServe()
+		if certFile != "" && keyFile != "" {
+			_ = srv.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			_ = srv.ListenAndServe()
+		}
 	}()
 	return srv, nil
 }
@@ -137,7 +159,7 @@ func (e *Exporter) handleIndexPage(w http.ResponseWriter, r *http.Request) {
       <li><a href="/otel/v1/metrics">/otel/v1/metrics</a> — Formato <b>OpenTelemetry OTLP JSON (resourceMetrics)</b></li>
       <li><a href="/api/v1/state">/api/v1/state</a> — Snapshot completo del estado + historial temporal + SRE/SLO en <b>JSON</b> (para Flutter Web)</li>
       <li><a href="/api/v1/sre">/api/v1/sre</a> — Estado de <b>Objetivos SLO, Error Budget, Alertas Críticas y Canales Telegram/Email</b></li>
-      <li><b>POST /api/v1/action</b> — Ejecución remota de acciones DBA y Linux/SAN con salida completa en tiempo real</li>
+      <li><b>POST /api/v1/action</b> — Ejecución remota autenticada de acciones DBA y Linux/SAN con validación anti-inyección</li>
       <li><a href="/healthz">/healthz</a> — Healthcheck HTTP 200 OK</li>
     </ul>
   </div>
@@ -152,17 +174,26 @@ func (e *Exporter) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 	e.mu.RLock()
 	st := e.state
 	updated := e.lastUpdated
-	cfg := e.sloConfig
-	slos := computeSLOs(e.totalSamples, e.goodAvailSamples, e.goodLockFreeSamples, e.goodStorageSamples, e.goodSANSamples, cfg)
+	cfg := maskSLOConfig(e.sloConfig)
+	authEnabled := e.apiToken != ""
+	slos := computeSLOs(e.totalSamples, e.goodAvailSamples, e.goodLockFreeSamples, e.goodStorageSamples, e.goodSANSamples, e.sloConfig)
 	alerts := append([]DelicateAlert(nil), e.activeAlerts...)
 	hist := append([]MetricHistoryPoint(nil), e.history...)
 	notifs := append([]NotificationEvent(nil), e.notifications...)
 	e.mu.RUnlock()
 
+	// Ensure Tablespace UsedPct is always populated even if collector only returned UsedMB/TotalMB
+	for i := range st.Tablespaces {
+		if st.Tablespaces[i].UsedPct <= 0 && st.Tablespaces[i].TotalMB > 0 && st.Tablespaces[i].UsedMB > 0 {
+			st.Tablespaces[i].UsedPct = float64(st.Tablespaces[i].UsedMB) * 100.0 / float64(st.Tablespaces[i].TotalMB)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	payload := map[string]interface{}{
 		"version":       e.version,
 		"last_updated":  updated.Format(time.RFC3339),
+		"auth_enabled":  authEnabled,
 		"state":         st,
 		"slos":          slos,
 		"active_alerts": alerts,

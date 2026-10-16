@@ -17,7 +17,7 @@ import (
 	"github.com/mario/ora-tui/internal/ui"
 )
 
-const AppVersion = "1.7.0"
+const AppVersion = "1.8.0"
 
 func main() {
 	mockFlag := flag.Bool("mock", false, "Force interactive mock/simulation mode with sample Oracle data")
@@ -34,11 +34,14 @@ func main() {
 	portAliasFlag := flag.Int("port", 0, "Alias for --otel-port")
 	otelAddrFlag := flag.String("otel-addr", "", "Bind address for OpenTelemetry/Prometheus server (e.g. 0.0.0.0:9161 or 127.0.0.1:9161)")
 	daemonFlag := flag.Bool("daemon", false, "Run in headless background daemon mode (no TUI) for systemd / Prometheus / OpenTelemetry")
+	apiTokenFlag := flag.String("api-token", "", "Bearer API token required for POST /api/v1/action and /api/v1/sre/* (or set ORATUI_API_TOKEN / /etc/ora-tui-token)")
+	tlsCertFlag := flag.String("tls-cert", "", "Path to TLS certificate PEM file to enable HTTPS on :9161")
+	tlsKeyFlag := flag.String("tls-key", "", "Path to TLS private key PEM file to enable HTTPS on :9161")
 
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("ora-tui v%s (MS-DOS Retro Themes + Server/SAN Health + OpenTelemetry + SRE/SLO & Remote Action API)\n", AppVersion)
+		fmt.Printf("ora-tui v%s (MS-DOS Retro Themes + Server/SAN Health + OpenTelemetry + Hardened SRE/SLO & Remote Action API)\n", AppVersion)
 		return
 	}
 
@@ -98,6 +101,7 @@ func main() {
 	var otelExp *telemetry.Exporter
 	if otelEnabled {
 		otelExp = telemetry.NewExporter(*state, listenAddr, AppVersion)
+		otelExp.SetSecurityConfig(*apiTokenFlag, *tlsCertFlag, *tlsKeyFlag)
 		if _, err := otelExp.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "[ERROR] Failed to start OpenTelemetry/Prometheus server on %s: %v\n", listenAddr, err)
 			os.Exit(1)

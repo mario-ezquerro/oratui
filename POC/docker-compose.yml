@@ -47,6 +47,10 @@ services:
     restart: unless-stopped
     ports:
       - "${FLUTTER_WEB_PORT:-8088}:80"
+    environment:
+      - FLUTTER_WEB_USER=${FLUTTER_WEB_USER:-admin}
+      - FLUTTER_WEB_PASSWORD=${FLUTTER_WEB_PASSWORD:-admin}
+      - ORATUI_API_TOKEN=${ORATUI_API_TOKEN:-}
     volumes:
       - ./flutter-web/build/web/servers.json:/usr/share/nginx/html/servers.json:ro
 

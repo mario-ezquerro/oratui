@@ -208,6 +208,7 @@
         - { src: "grafana/dashboards/oratui_full_poc_dashboard.json", dest: "grafana/dashboards/oratui_full_poc_dashboard.json" }
         - { src: "flutter-web/Dockerfile", dest: "flutter-web/Dockerfile" }
         - { src: "flutter-web/nginx.conf", dest: "flutter-web/nginx.conf" }
+        - { src: "flutter-web/docker-entrypoint.sh", dest: "flutter-web/docker-entrypoint.sh", mode: "0755" }
         - { src: "flutter-web/build/web/", dest: "flutter-web/build/web/" }
 
     - name: Generar dinámicamente prometheus/targets.yml con todos los servidores de [oracle_servers]

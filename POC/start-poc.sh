@@ -82,6 +82,9 @@ GRAFANA_PORT=3000
 FLUTTER_WEB_PORT=8088
 GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=admin
+FLUTTER_WEB_USER=admin
+FLUTTER_WEB_PASSWORD=admin
+ORATUI_API_TOKEN=
 EOF
 
   if [[ "$MODE_CHOICE" == "2" ]] || [[ ! -f prometheus/targets.yml ]]; then
@@ -174,10 +177,10 @@ echo "==========================================================================
 echo "  ✅ POC MULTI-SERVIDOR ORA-TUI ACTIVA"
 echo "=========================================================================="
 echo "  • 🚀 Flutter Web Command & SRE Center : http://${SERVER_IP}:8088"
-echo "    (Gráficas en vivo + Ejecución Remota SQL/RMAN/OS + SLOs + Telegram/Email)"
+echo "    Usuario / Contraseña (.env)         : admin / admin"
 echo "  • 📊 Grafana (01. Vista Global Flota) : http://${SERVER_IP}:3000"
 echo "  • 📊 Grafana (02. Detalle 26 Paneles) : http://${SERVER_IP}:3000/d/oratui-full-observability-poc"
-echo "    Usuario / Contraseña                : admin / admin"
+echo "    Usuario / Contraseña (.env)         : admin / admin"
 echo "  • 🔥 Prometheus (Targets Dinámicos)   : http://${SERVER_IP}:9090/targets"
 echo "  • 🚨 Prometheus (15 Alertas)          : http://${SERVER_IP}:9090/alerts"
 echo "=========================================================================="

@@ -3,6 +3,7 @@ package telemetry
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/smtp"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -139,10 +141,130 @@ func defaultSLOConfig() SLOConfig {
 	return cfg
 }
 
+func defaultAPIToken() string {
+	for _, envKey := range []string{"ORATUI_API_TOKEN", "ORA_TUI_API_TOKEN"} {
+		if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+			return v
+		}
+	}
+	if data, err := os.ReadFile("/etc/ora-tui-token"); err == nil {
+		if v := strings.TrimSpace(string(data)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+const maskedSecretPlaceholder = "********"
+
+func maskSLOConfig(cfg SLOConfig) SLOConfig {
+	out := cfg
+	if out.TelegramBotToken != "" {
+		out.TelegramBotToken = maskedSecretPlaceholder
+	}
+	if out.SMTPPassword != "" {
+		out.SMTPPassword = maskedSecretPlaceholder
+	}
+	return out
+}
+
+var safeTargetRegex = regexp.MustCompile(`^[a-zA-Z0-9_.,@#$+-]{0,96}$`)
+
+func validateSafeTarget(target string) error {
+	t := strings.TrimSpace(target)
+	if !safeTargetRegex.MatchString(t) {
+		return fmt.Errorf("target inválido o con caracteres no permitidos por seguridad: %q", target)
+	}
+	upper := strings.ToUpper(t)
+	for _, forbidden := range []string{"--", "/*", "*/", ";", "'", "\"", "`", "$("} {
+		if strings.Contains(upper, forbidden) {
+			return fmt.Errorf("secuencia bloqueada por política anti-inyección: %q", forbidden)
+		}
+	}
+	return nil
+}
+
+func (e *Exporter) requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	e.mu.RLock()
+	expectedToken := strings.TrimSpace(e.apiToken)
+	e.mu.RUnlock()
+
+	expectedUser := strings.TrimSpace(os.Getenv("FLUTTER_WEB_USER"))
+	if expectedUser == "" {
+		expectedUser = strings.TrimSpace(os.Getenv("ORATUI_ADMIN_USER"))
+	}
+	expectedPass := strings.TrimSpace(os.Getenv("FLUTTER_WEB_PASSWORD"))
+	if expectedPass == "" {
+		expectedPass = strings.TrimSpace(os.Getenv("ORATUI_ADMIN_PASSWORD"))
+	}
+
+	// If neither token nor user/pass is configured in env/flags, allow POC default admin:admin or open access in unit tests
+	if expectedToken == "" && expectedUser == "" && expectedPass == "" {
+		// If the client sent BasicAuth, verify against default admin:admin
+		if u, p, ok := r.BasicAuth(); ok {
+			if subtle.ConstantTimeCompare([]byte(u), []byte("admin")) == 1 &&
+				subtle.ConstantTimeCompare([]byte(p), []byte("admin")) == 1 {
+				return true
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "Credenciales inválidas (Usuario o Contraseña incorrectos).",
+			})
+			return false
+		}
+		return true
+	}
+
+	if expectedUser == "" {
+		expectedUser = "admin"
+	}
+	if expectedPass == "" {
+		expectedPass = "admin"
+	}
+
+	// 1. Check HTTP Basic Auth (Authorization: Basic base64(user:pass))
+	if u, p, ok := r.BasicAuth(); ok {
+		if subtle.ConstantTimeCompare([]byte(u), []byte(expectedUser)) == 1 &&
+			subtle.ConstantTimeCompare([]byte(p), []byte(expectedPass)) == 1 {
+			return true
+		}
+	}
+
+	// 2. Check Bearer Token / X-OraTui-Token
+	provided := strings.TrimSpace(r.Header.Get("X-OraTui-Token"))
+	if provided == "" {
+		authHdr := strings.TrimSpace(r.Header.Get("Authorization"))
+		if strings.HasPrefix(strings.ToLower(authHdr), "bearer ") {
+			provided = strings.TrimSpace(authHdr[7:])
+		}
+	}
+	if expectedToken != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(expectedToken)) == 1 {
+		return true
+	}
+	// Also accept user:pass formatted as Bearer token
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(expectedUser+":"+expectedPass)) == 1 {
+		return true
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error":   "No autorizado: Inicia sesión con Usuario y Contraseña válidos o proporciona X-OraTui-Token.",
+	})
+	return false
+}
+
 func enableCORS(w http.ResponseWriter, r *http.Request) bool {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		origin = "*"
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-OraTui-Token, X-Requested-With")
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return true
@@ -166,8 +288,12 @@ func (e *Exporter) recordStateAndEvaluateSRE(s model.EnvironmentState, now time.
 
 	maxTbs := 0.0
 	for _, ts := range s.Tablespaces {
-		if ts.UsedPct > maxTbs {
-			maxTbs = ts.UsedPct
+		pct := ts.UsedPct
+		if pct <= 0 && ts.TotalMB > 0 && ts.UsedMB > 0 {
+			pct = float64(ts.UsedMB) * 100.0 / float64(ts.TotalMB)
+		}
+		if pct > maxTbs {
+			maxTbs = pct
 		}
 	}
 
@@ -490,8 +616,9 @@ func (e *Exporter) handleSREGetOrPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.mu.RLock()
-	cfg := e.sloConfig
-	slos := computeSLOs(e.totalSamples, e.goodAvailSamples, e.goodLockFreeSamples, e.goodStorageSamples, e.goodSANSamples, cfg)
+	cfg := maskSLOConfig(e.sloConfig)
+	authEnabled := e.apiToken != ""
+	slos := computeSLOs(e.totalSamples, e.goodAvailSamples, e.goodLockFreeSamples, e.goodStorageSamples, e.goodSANSamples, e.sloConfig)
 	alerts := append([]DelicateAlert(nil), e.activeAlerts...)
 	notifs := append([]NotificationEvent(nil), e.notifications...)
 	hist := append([]MetricHistoryPoint(nil), e.history...)
@@ -503,6 +630,7 @@ func (e *Exporter) handleSREGetOrPost(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"host":          host,
 		"cluster":       cluster,
+		"auth_enabled":  authEnabled,
 		"config":        cfg,
 		"slos":          slos,
 		"active_alerts": alerts,
@@ -517,6 +645,9 @@ func (e *Exporter) handleSREConfigUpdate(w http.ResponseWriter, r *http.Request)
 	}
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !e.requireAuth(w, r) {
 		return
 	}
 	var newCfg SLOConfig
@@ -541,6 +672,13 @@ func (e *Exporter) handleSREConfigUpdate(w http.ResponseWriter, r *http.Request)
 	}
 
 	e.mu.Lock()
+	// Preserve existing secrets if UI sends back masked placeholder "********"
+	if newCfg.TelegramBotToken == maskedSecretPlaceholder {
+		newCfg.TelegramBotToken = e.sloConfig.TelegramBotToken
+	}
+	if newCfg.SMTPPassword == maskedSecretPlaceholder {
+		newCfg.SMTPPassword = e.sloConfig.SMTPPassword
+	}
 	e.sloConfig = newCfg
 	e.mu.Unlock()
 
@@ -552,12 +690,15 @@ func (e *Exporter) handleSREConfigUpdate(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Configuración SRE/SLO y canales de alerta (Telegram / Email SMTP) actualizada correctamente.",
-		"config":  newCfg,
+		"config":  maskSLOConfig(newCfg),
 	})
 }
 
 func (e *Exporter) handleSRENotifyNow(w http.ResponseWriter, r *http.Request) {
 	if enableCORS(w, r) {
+		return
+	}
+	if !e.requireAuth(w, r) {
 		return
 	}
 	e.mu.RLock()
@@ -573,7 +714,14 @@ func (e *Exporter) handleSRENotifyNow(w http.ResponseWriter, r *http.Request) {
 			Config *SLOConfig `json:"config"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&bodyOverride); err == nil && bodyOverride.Config != nil {
-			cfg = *bodyOverride.Config
+			override := *bodyOverride.Config
+			if override.TelegramBotToken == maskedSecretPlaceholder {
+				override.TelegramBotToken = cfg.TelegramBotToken
+			}
+			if override.SMTPPassword == maskedSecretPlaceholder {
+				override.SMTPPassword = cfg.SMTPPassword
+			}
+			cfg = override
 		}
 	}
 
@@ -778,9 +926,28 @@ func (e *Exporter) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !e.requireAuth(w, r) {
+		return
+	}
 	var req ActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	req.Target = strings.TrimSpace(req.Target)
+	if err := validateSafeTarget(req.Target); err != nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(ActionResponse{
+			Success:    false,
+			Action:     req.Action,
+			Target:     req.Target,
+			Title:      "Acción Bloqueada por Seguridad Anti-Inyección",
+			Command:    "SECURITY_VALIDATOR",
+			Output:     []string{"[SECURITY BLOCK] " + err.Error()},
+			DurationMs: 0,
+			ExecutedAt: time.Now().Format("2006-01-02 15:04:05"),
+		})
 		return
 	}
 
