@@ -1,14 +1,13 @@
+#!/usr/bin/env groovy
 // ==============================================================================
-// Jenkinsfile — Pipeline CI/CD y Gestión de Flota Oracle para ora-tui (v1.6.0)
+// Jenkinsfile — Pipeline Declarativo en Groovy para ora-tui (v1.6.0)
 //
-// Permite desde la interfaz gráfica de Jenkins:
-//   1. Compilar ora-tui (CGO_ENABLED=0), ejecutar tests y empaquetar .rpm y .deb
-//   2. Instalar y mantener el daemon systemd "ora-tui-otel" en todos los
-//      servidores Oracle del inventario (POC/ansible/inventory.ini)
-//   3. Dar de alta nuevos servidores Oracle en el inventario desde un formulario
-//   4. Mantener y actualizar en caliente Prometheus (targets.yml file_sd) y
-//      los 2 Dashboards de Grafana (Flota Multi-Servidor + 26 Paneles Detalle)
-//   5. Ejecutar auditorías de salud (/healthz) sobre toda la flota
+// Gestiona de extremo a extremo mediante Ansible:
+//   1. Las máquinas con Oracle ([oracle_servers]): instala/actualiza el paquete
+//      ora-tui (.rpm/.deb) y mantiene activo el daemon systemd "ora-tui-otel".
+//   2. La máquina del servidor central ([monitoring_server]): instala/mantiene
+//      Prometheus + Grafana y actualiza en caliente (file_sd_configs) el listado
+//      de servidores Oracle monitorizados (targets.yml) y los 2 Dashboards.
 // ==============================================================================
 
 pipeline {
@@ -17,223 +16,311 @@ pipeline {
     options {
         timestamps()
         ansiColor('xterm')
-        buildDiscarder(logRotator(numToKeepStr: '30'))
+        buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
         disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
     }
 
     parameters {
         choice(
             name: 'ACTION',
             choices: [
-                'DEPLOY_ALL_ANSIBLE',
-                'FULL_CI_CD_AND_DEPLOY',
-                'UPDATE_MONITORING_TARGETS_ONLY',
+                'DEPLOY_ALL',
+                'UPDATE_MONITORING_ONLY',
                 'UPDATE_ORACLE_DAEMONS_ONLY',
-                'ADD_NEW_ORACLE_SERVER',
-                'HEALTH_CHECK_FLEET'
+                'BUILD_PACKAGES_AND_DEPLOY',
+                'HEALTH_CHECK_ONLY'
             ],
-            description: '''Acción a ejecutar:
-• DEPLOY_ALL_ANSIBLE: Instala/mantiene el daemon ora-tui-otel en [oracle_servers] y actualiza Prometheus + Grafana en [monitoring_server].
-• FULL_CI_CD_AND_DEPLOY: Compila Go, pasa tests, genera .rpm/.deb y despliega todo con Ansible.
-• UPDATE_MONITORING_TARGETS_ONLY: Solo actualiza el listado de máquinas (targets.yml) y dashboards en Prometheus/Grafana.
-• UPDATE_ORACLE_DAEMONS_ONLY: Solo instala/actualiza el daemon ora-tui-otel en los servidores Oracle.
-• ADD_NEW_ORACLE_SERVER: Añade un nuevo servidor Oracle al inventario, le instala el daemon y actualiza Prometheus/Grafana.
-• HEALTH_CHECK_FLEET: Verifica que todos los daemons ora-tui-otel (:9161/healthz), Prometheus (:9090) y Grafana (:3000) responden.'''
-        )
-        string(
-            name: 'LIMIT_HOSTS',
-            defaultValue: 'all',
-            description: 'Limitar ejecución de Ansible a un host o grupo concreto (ej. all, oracle_servers, monitoring_server, ora-prod-rac01.local)'
-        )
-        string(
-            name: 'NEW_SERVER_HOSTNAME',
-            defaultValue: '',
-            description: '[Solo para ADD_NEW_ORACLE_SERVER] Nombre del nuevo servidor Oracle (ej. ora-prod-rac03.local)'
-        )
-        string(
-            name: 'NEW_SERVER_IP',
-            defaultValue: '',
-            description: '[Solo para ADD_NEW_ORACLE_SERVER] Dirección IP o DNS del nuevo servidor Oracle (ej. 192.168.10.13)'
+            description: 'DEPLOY_ALL: Despliega daemon en servidores Oracle y actualiza Prometheus/Grafana | UPDATE_MONITORING_ONLY: Solo actualiza targets.yml, Prometheus y Grafana | UPDATE_ORACLE_DAEMONS_ONLY: Solo actualiza el daemon en servidores Oracle | BUILD_PACKAGES_AND_DEPLOY: Compila Go + RPM/DEB y despliega todo | HEALTH_CHECK_ONLY: Verifica /healthz en toda la flota'
         )
         choice(
-            name: 'NEW_SERVER_ENV',
-            choices: ['PROD', 'PRE', 'DES'],
-            description: '[Solo para ADD_NEW_ORACLE_SERVER] Entorno del nuevo servidor Oracle'
+            name: 'INVENTORY_SOURCE',
+            choices: [
+                'USE_REPO_INVENTORY_FILE',
+                'USE_JENKINS_PARAMETERS'
+            ],
+            description: 'USE_REPO_INVENTORY_FILE: Usa POC/ansible/inventory.ini del repositorio Git | USE_JENKINS_PARAMETERS: Genera el inventario usando los parámetros MONITORING_SERVER y ORACLE_SERVERS de abajo'
         )
         string(
-            name: 'NEW_SERVER_CLUSTER',
-            defaultValue: 'rac-prod',
-            description: '[Solo para ADD_NEW_ORACLE_SERVER] Etiqueta de cluster o grupo (ej. rac-prod, single-erp)'
+            name: 'MONITORING_SERVER',
+            defaultValue: 'monitor-server.local ansible_host=192.168.10.100',
+            description: 'Servidor donde se instala/mantiene Prometheus y Grafana ([monitoring_server])'
+        )
+        text(
+            name: 'ORACLE_SERVERS',
+            defaultValue: '''ora-prod-rac01.local  ansible_host=192.168.10.11  env=PROD  cluster_label=rac-prod   otel_port=9161
+ora-prod-rac02.local  ansible_host=192.168.10.12  env=PROD  cluster_label=rac-prod   otel_port=9161
+ora-pre-db01.local    ansible_host=192.168.20.11  env=PRE   cluster_label=single-pre otel_port=9161
+ora-des-db01.local    ansible_host=192.168.30.11  env=DES   cluster_label=single-des otel_port=9161''',
+            description: 'Listado de máquinas con Oracle ([oracle_servers]). Una máquina por línea con su IP (ansible_host), entorno (env) y cluster (cluster_label).'
         )
         string(
-            name: 'OTEL_PORT',
+            name: 'ANSIBLE_LIMIT',
+            defaultValue: 'all',
+            description: 'Limitar ejecución de Ansible a un servidor o grupo (ej. all, oracle_servers, monitoring_server, ora-prod-rac01.local)'
+        )
+        string(
+            name: 'DEFAULT_OTEL_PORT',
             defaultValue: '9161',
-            description: 'Puerto TCP del exportador OpenTelemetry/Prometheus de ora-tui'
+            description: 'Puerto por defecto del exportador OpenTelemetry/Prometheus de ora-tui'
+        )
+        string(
+            name: 'SCRAPE_INTERVAL',
+            defaultValue: '10s',
+            description: 'Intervalo de recolección del daemon ora-tui en cada servidor Oracle'
         )
         string(
             name: 'SSH_CREDENTIALS_ID',
-            defaultValue: '',
-            description: '(Opcional) ID de credencial SSH en Jenkins para conectar por Ansible. Dejar vacío si el agente Jenkins ya tiene claves SSH.'
+            defaultValue: 'oracle-ansible-ssh',
+            description: 'ID de la credencial SSH (SSH Username with private key) en Jenkins para conectar a los servidores. Dejar vacío si el nodo Jenkins ya tiene claves SSH configuradas.'
         )
         booleanParam(
-            name: 'DRY_RUN_CHECK',
+            name: 'ANSIBLE_DRY_RUN',
             defaultValue: false,
-            description: 'Ejecutar Ansible en modo simulación (--check --diff) sin aplicar cambios reales'
+            description: 'Ejecutar Ansible en modo simulación (--check --diff) sin aplicar cambios en los servidores'
         )
     }
 
     environment {
+        CGO_ENABLED    = '0'
+        ANSIBLE_DIR    = "${WORKSPACE}/POC/ansible"
+        INVENTORY_PATH = "${WORKSPACE}/POC/ansible/inventory.ini"
+        PLAYBOOK_PATH  = "${WORKSPACE}/POC/ansible/site.yml"
         ANSIBLE_CONFIG = "${WORKSPACE}/POC/ansible/ansible.cfg"
-        INVENTORY_FILE = "${WORKSPACE}/POC/ansible/inventory.ini"
-        PLAYBOOK_FILE  = "${WORKSPACE}/POC/ansible/site.yml"
-        CGO_ENABLED    = "0"
+        ANSIBLE_FORCE_COLOR = 'true'
     }
 
     stages {
-        stage('1. Validar Inventario & Parámetros') {
+        stage('1. Preparar y Validar Inventario') {
             steps {
                 script {
-                    echo "=========================================================================="
-                    echo "  ORA-TUI JENKINS PIPELINE :: ACCIÓN = ${params.ACTION}"
-                    echo "=========================================================================="
-                    sh '''
-                        echo ">>> Contenido actual del inventario Ansible (${INVENTORY_FILE}):"
-                        cat "${INVENTORY_FILE}"
-                    '''
-                }
-            }
-        }
+                    echo ">>> Acción seleccionada: ${params.ACTION}"
+                    echo ">>> Origen del inventario: ${params.INVENTORY_SOURCE}"
 
-        stage('2. Alta de Nuevo Servidor Oracle en Inventario') {
-            when {
-                expression { params.ACTION == 'ADD_NEW_ORACLE_SERVER' }
-            }
-            steps {
-                script {
-                    if (!params.NEW_SERVER_HOSTNAME?.trim()) {
-                        error("Debes indicar NEW_SERVER_HOSTNAME cuando seleccionas ADD_NEW_ORACLE_SERVER.")
+                    if (params.INVENTORY_SOURCE == 'USE_JENKINS_PARAMETERS') {
+                        def oracleLines = params.ORACLE_SERVERS
+                            .split('\n')
+                            .collect { it.trim() }
+                            .findAll { it && !it.startsWith('#') }
+
+                        if (oracleLines.isEmpty()) {
+                            error('El parámetro ORACLE_SERVERS no puede estar vacío cuando se usa USE_JENKINS_PARAMETERS.')
+                        }
+                        if (!params.MONITORING_SERVER?.trim()) {
+                            error('El parámetro MONITORING_SERVER no puede estar vacío.')
+                        }
+
+                        def generatedInventory = """# Inventario generado automáticamente por Jenkins (Build #${env.BUILD_NUMBER})
+[oracle_servers]
+${oracleLines.join('\n')}
+
+[monitoring_server]
+${params.MONITORING_SERVER.trim()}
+
+[all:vars]
+ansible_user=root
+default_otel_port=${params.DEFAULT_OTEL_PORT.trim()}
+oratui_scrape_interval=${params.SCRAPE_INTERVAL.trim()}
+poc_install_dir=/opt/oratui-poc
+oratui_rpm_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.6.0-1.x86_64.rpm
+oratui_deb_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.6.0-1_amd64.deb
+"""
+                        writeFile(file: env.INVENTORY_PATH, text: generatedInventory, encoding: 'UTF-8')
                     }
-                    def hostIp = params.NEW_SERVER_IP?.trim() ? params.NEW_SERVER_IP.trim() : params.NEW_SERVER_HOSTNAME.trim()
-                    echo ">>> Añadiendo servidor ${params.NEW_SERVER_HOSTNAME} (${hostIp}) al grupo [oracle_servers]..."
-                    sh """
-                        if grep -q "^${params.NEW_SERVER_HOSTNAME}[[:space:]]" "\${INVENTORY_FILE}"; then
-                            echo "El servidor ${params.NEW_SERVER_HOSTNAME} ya existe en el inventario; actualizando línea..."
-                            sed -i.bak "s|^${params.NEW_SERVER_HOSTNAME}[[:space:]].*|${params.NEW_SERVER_HOSTNAME}  ansible_host=${hostIp}  env=${params.NEW_SERVER_ENV}  cluster_label=${params.NEW_SERVER_CLUSTER}  otel_port=${params.OTEL_PORT}|" "\${INVENTORY_FILE}"
-                            rm -f "\${INVENTORY_FILE}.bak"
-                        else
-                            awk '/^\\[oracle_servers\\]/{print; print "${params.NEW_SERVER_HOSTNAME}  ansible_host=${hostIp}  env=${params.NEW_SERVER_ENV}  cluster_label=${params.NEW_SERVER_CLUSTER}  otel_port=${params.OTEL_PORT}"; next}1' "\${INVENTORY_FILE}" > "\${INVENTORY_FILE}.tmp"
-                            mv "\${INVENTORY_FILE}.tmp" "\${INVENTORY_FILE}"
-                        fi
-                        cat "\${INVENTORY_FILE}"
-                    """
+
+                    def currentInventory = readFile(file: env.INVENTORY_PATH, encoding: 'UTF-8')
+                    echo "================ INVENTARIO ACTIVO ================"
+                    echo currentInventory
+                    echo "==================================================="
                 }
             }
         }
 
-        stage('3. Compilar Binario Estático Go & Generar Paquetes (.rpm / .deb)') {
+        stage('2. Compilar Binario Go y Paquetes RPM/DEB') {
             when {
-                expression { params.ACTION == 'FULL_CI_CD_AND_DEPLOY' }
+                expression { return params.ACTION == 'BUILD_PACKAGES_AND_DEPLOY' }
             }
             steps {
                 sh '''
-                    echo ">>> Ejecutando tests unitarios y compilando ora-tui (CGO_ENABLED=0)..."
+                    set -eu
+                    echo ">>> Ejecutando tests unitarios y compilación estática (CGO_ENABLED=0)..."
                     make all
-                    if command -v nfpm >/dev/null 2>&1 || go version >/dev/null 2>&1; then
-                        make packages
-                    fi
+                    make packages
                     ls -lh bin/ dist/
                 '''
             }
         }
 
-        stage('4. Ansible: Instalar/Mantener Daemon ora-tui-otel en Servidores Oracle') {
+        stage('3. Ansible: Instalar/Mantener Daemon en Servidores Oracle') {
             when {
                 expression {
-                    params.ACTION in [
-                        'DEPLOY_ALL_ANSIBLE',
-                        'FULL_CI_CD_AND_DEPLOY',
-                        'UPDATE_ORACLE_DAEMONS_ONLY',
-                        'ADD_NEW_ORACLE_SERVER'
+                    return params.ACTION in [
+                        'DEPLOY_ALL',
+                        'BUILD_PACKAGES_AND_DEPLOY',
+                        'UPDATE_ORACLE_DAEMONS_ONLY'
                     ]
                 }
             }
             steps {
                 script {
-                    def checkFlag = params.DRY_RUN_CHECK ? '--check --diff' : ''
-                    def limitTarget = (params.ACTION == 'ADD_NEW_ORACLE_SERVER' && params.NEW_SERVER_HOSTNAME?.trim())
-                        ? params.NEW_SERVER_HOSTNAME.trim()
-                        : params.LIMIT_HOSTS
-                    def cmd = "ansible-playbook -i \"${env.INVENTORY_FILE}\" \"${env.PLAYBOOK_FILE}\" --tags oracle --limit \"${limitTarget}\" -e default_otel_port=${params.OTEL_PORT} ${checkFlag}"
-
-                    if (params.SSH_CREDENTIALS_ID?.trim()) {
-                        sshagent(credentials: [params.SSH_CREDENTIALS_ID.trim()]) {
-                            sh cmd
-                        }
-                    } else {
-                        sh cmd
-                    }
+                    runAnsiblePlaybook(
+                        tags: 'oracle',
+                        limit: params.ANSIBLE_LIMIT,
+                        dryRun: params.ANSIBLE_DRY_RUN,
+                        sshCredsId: params.SSH_CREDENTIALS_ID,
+                        otelPort: params.DEFAULT_OTEL_PORT,
+                        scrapeInterval: params.SCRAPE_INTERVAL
+                    )
                 }
             }
         }
 
-        stage('5. Ansible: Actualizar Prometheus (targets.yml) & Grafana Multi-Servidor') {
+        stage('4. Ansible: Instalar/Mantener Prometheus y Grafana en Servidor Central') {
             when {
                 expression {
-                    params.ACTION in [
-                        'DEPLOY_ALL_ANSIBLE',
-                        'FULL_CI_CD_AND_DEPLOY',
-                        'UPDATE_MONITORING_TARGETS_ONLY',
-                        'ADD_NEW_ORACLE_SERVER'
+                    return params.ACTION in [
+                        'DEPLOY_ALL',
+                        'BUILD_PACKAGES_AND_DEPLOY',
+                        'UPDATE_MONITORING_ONLY'
                     ]
                 }
             }
             steps {
                 script {
-                    def checkFlag = params.DRY_RUN_CHECK ? '--check --diff' : ''
-                    def cmd = "ansible-playbook -i \"${env.INVENTORY_FILE}\" \"${env.PLAYBOOK_FILE}\" --tags monitoring -e default_otel_port=${params.OTEL_PORT} ${checkFlag}"
-
-                    if (params.SSH_CREDENTIALS_ID?.trim()) {
-                        sshagent(credentials: [params.SSH_CREDENTIALS_ID.trim()]) {
-                            sh cmd
-                        }
-                    } else {
-                        sh cmd
-                    }
+                    runAnsiblePlaybook(
+                        tags: 'monitoring',
+                        limit: params.ANSIBLE_LIMIT,
+                        dryRun: params.ANSIBLE_DRY_RUN,
+                        sshCredsId: params.SSH_CREDENTIALS_ID,
+                        otelPort: params.DEFAULT_OTEL_PORT,
+                        scrapeInterval: params.SCRAPE_INTERVAL
+                    )
                 }
             }
         }
 
-        stage('6. Verificación de Salud (/healthz) de Toda la Flota') {
+        stage('5. Verificar Salud (/healthz) de Toda la Flota') {
             steps {
-                sh '''
-                    echo ">>> Verificando conectividad con los endpoints /healthz de los servidores del inventario..."
-                    awk '/^\\[oracle_servers\\]/{flag=1; next} /^\\[/{flag=0} flag && $1 !~ /^#/ && NF>0 {
-                        host=$1; ip=$1; port="9161";
-                        for(i=2;i<=NF;i++) {
-                            if ($i ~ /^ansible_host=/) { split($i,a,"="); ip=a[2]; }
-                            if ($i ~ /^otel_port=/)    { split($i,p,"="); port=p[2]; }
-                        }
-                        printf "  • Comprobando %-25s (http://%s:%s/healthz) ... ", host, ip, port;
-                        if (system("curl -fsS --connect-timeout 3 http://" ip ":" port "/healthz >/dev/null 2>&1") == 0) {
-                            print "[OK]";
+                script {
+                    def inventoryText = readFile(file: env.INVENTORY_PATH, encoding: 'UTF-8')
+                    def targets = parseInventoryEndpoints(inventoryText, params.DEFAULT_OTEL_PORT.trim())
+
+                    echo ">>> Comprobando endpoints OpenTelemetry (/healthz) en ${targets.size()} servidores Oracle..."
+                    for (t in targets) {
+                        def targetUrl = "http://${t.ip}:${t.port}/healthz"
+                        def status = sh(
+                            script: "curl -fsS --connect-timeout 3 '${targetUrl}' >/dev/null 2>&1",
+                            returnStatus: true
+                        )
+                        if (status == 0) {
+                            echo "  [OK] ${t.name} (${targetUrl}) -> ONLINE"
                         } else {
-                            print "[SIN RESPUESTA / PENDIENTE]";
+                            echo "  [WARN] ${t.name} (${targetUrl}) -> SIN RESPUESTA"
                         }
-                    }' "${INVENTORY_FILE}"
-                '''
+                    }
+                }
             }
         }
     }
 
     post {
         always {
-            archiveArtifacts artifacts: 'POC/ansible/inventory.ini, POC/prometheus/targets.yml, dist/*.rpm, dist/*.deb', allowEmptyArchive: true
+            archiveArtifacts(
+                artifacts: 'POC/ansible/inventory.ini, POC/prometheus/targets.yml, dist/*.rpm, dist/*.deb',
+                allowEmptyArchive: true
+            )
         }
         success {
-            echo "✅ Pipeline de Observabilidad Oracle (ora-tui + Ansible + Prometheus + Grafana) completado con éxito."
+            echo '✅ Pipeline finalizado correctamente: Daemons ora-tui-otel, Prometheus (targets.yml) y Grafana actualizados.'
         }
         failure {
-            echo "❌ El pipeline falló. Revisa los logs de la etapa correspondiente en Jenkins."
+            echo '❌ El pipeline ha fallado. Revisa el log de la etapa correspondiente.'
         }
     }
+}
+
+// ==============================================================================
+// Funciones auxiliares en Groovy nativo para Jenkins Pipeline
+// ==============================================================================
+
+def runAnsiblePlaybook(Map cfg) {
+    def extraArgs = []
+    extraArgs << "-i '${env.INVENTORY_PATH}'"
+    extraArgs << "'${env.PLAYBOOK_PATH}'"
+    extraArgs << "--tags '${cfg.tags}'"
+
+    if (cfg.limit?.trim()) {
+        extraArgs << "--limit '${cfg.limit.trim()}'"
+    }
+    extraArgs << "-e 'default_otel_port=${cfg.otelPort.trim()}'"
+    extraArgs << "-e 'oratui_scrape_interval=${cfg.scrapeInterval.trim()}'"
+
+    if (cfg.dryRun) {
+        extraArgs << '--check --diff'
+    }
+
+    def ansibleCmd = "ansible-playbook ${extraArgs.join(' ')}"
+
+    // Si existe la credencial SSH en Jenkins, la inyectamos con withCredentials;
+    // si no existe o está vacía, ejecutamos directamente con las claves del agente Jenkins.
+    if (cfg.sshCredsId?.trim()) {
+        try {
+            withCredentials([
+                sshUserPrivateKey(
+                    credentialsId: cfg.sshCredsId.trim(),
+                    keyFileVariable: 'ANSIBLE_SSH_KEY_FILE',
+                    usernameVariable: 'ANSIBLE_SSH_USER'
+                )
+            ]) {
+                sh """
+                    set -eu
+                    ${ansibleCmd} -u "\$ANSIBLE_SSH_USER" --private-key="\$ANSIBLE_SSH_KEY_FILE"
+                """
+            }
+        } catch (Exception e) {
+            echo ">>> Credencial '${cfg.sshCredsId}' no encontrada en Jenkins Credentials; ejecutando con la clave SSH por defecto del agente..."
+            sh """
+                set -eu
+                ${ansibleCmd}
+            """
+        }
+    } else {
+        sh """
+            set -eu
+            ${ansibleCmd}
+        """
+    }
+}
+
+@NonCPS
+List<Map> parseInventoryEndpoints(String content, String fallbackPort) {
+    List<Map> result = []
+    boolean inOracleSection = false
+
+    for (String rawLine : content.split('\n')) {
+        String line = rawLine.trim()
+        if (!line || line.startsWith('#') || line.startsWith(';')) {
+            continue
+        }
+        if (line.startsWith('[')) {
+            inOracleSection = (line == '[oracle_servers]')
+            continue
+        }
+        if (inOracleSection) {
+            String[] tokens = line.split('\\s+')
+            String hostName = tokens[0]
+            String hostIp   = hostName
+            String port     = fallbackPort
+
+            for (int i = 1; i < tokens.length; i++) {
+                if (tokens[i].startsWith('ansible_host=')) {
+                    hostIp = tokens[i].substring('ansible_host='.length())
+                } else if (tokens[i].startsWith('otel_port=')) {
+                    port = tokens[i].substring('otel_port='.length())
+                }
+            }
+            result.add([name: hostName, ip: hostIp, port: port])
+        }
+    }
+    return result
 }
