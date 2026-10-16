@@ -1,0 +1,13 @@
+# ==============================================================================
+# Fichero autogenerado por Ansible a partir del grupo [oracle_servers]
+# Prometheus recarga este fichero en caliente (file_sd_configs) sin reiniciar.
+# ==============================================================================
+{% for host in groups['oracle_servers'] %}
+- targets:
+    - "{{ hostvars[host].ansible_host | default(host) }}:{{ hostvars[host].otel_port | default(default_otel_port | default(9161)) }}"
+  labels:
+    oracle_host: "{{ host }}"
+    env: "{{ hostvars[host].env | default('PROD') }}"
+    cluster_group: "{{ hostvars[host].cluster_label | default('oracle-db') }}"
+    application: "ora-tui"
+{% endfor %}

@@ -1,0 +1,15 @@
+# ==============================================================================
+# Listado dinámico de servidores Oracle monitorizados por Prometheus (file_sd)
+# Este fichero es actualizado automáticamente por:
+#   - Ansible (POC/ansible/site.yml a partir de POC/ansible/inventory.ini)
+#   - Jenkins (Pipeline CI/CD de gestión de flota)
+#   - Script interactivo (./configure-poc.sh)
+# Prometheus recarga los cambios en caliente cada 15s sin reiniciar el contenedor.
+# ==============================================================================
+- targets:
+    - "servidor-oracle.local:9161"
+  labels:
+    oracle_host: "servidor-oracle.local"
+    env: "PROD"
+    cluster_group: "oracle-db"
+    application: "ora-tui"

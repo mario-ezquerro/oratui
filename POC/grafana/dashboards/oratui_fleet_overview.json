@@ -1,0 +1,576 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "🔍 Abrir Detalle Completo de Servidor (26 Paneles)",
+      "tooltip": "Ir al dashboard detallado de 26 paneles por servidor",
+      "type": "link",
+      "url": "/d/oratui-full-observability-poc"
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "1. Estado Global de la Flota Oracle (Haz clic en cualquier tarjeta para abrir los 26 paneles de ese servidor)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "count(oratui_info{host=~\"$host\"})",
+          "legendFormat": "Servidores Activos",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Servidores Oracle",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Abrir 26 paneles de ${__field.labels.host}",
+              "url": "/d/oratui-full-observability-poc?var-host=${__field.labels.host}"
+            }
+          ],
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 2, "text": "DOWN" },
+                "0.5": { "color": "yellow", "index": 1, "text": "MOUNTED" },
+                "1": { "color": "green", "index": 0, "text": "OPEN" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 4, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_instance_up{host=~\"$host\"}",
+          "legendFormat": "{{host}} -> {{instance}} ({{open_mode}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Mapa de Instancias de la Flota (Clic para abrir servidor)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Abrir 26 paneles de ${__field.labels.host}",
+              "url": "/d/oratui-full-observability-poc?var-host=${__field.labels.host}"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_sessions_blocking_locks_total{host=~\"$host\"}",
+          "legendFormat": "Locks: {{host}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Bloqueos TX/TM por Servidor (Clic para abrir)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Abrir 26 paneles de ${__field.labels.host}",
+              "url": "/d/oratui-full-observability-poc?var-host=${__field.labels.host}"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_alert_ora_errors_total{host=~\"$host\"}",
+          "legendFormat": "ORA- en {{host}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Errores ORA- en Alert Log por Servidor (Clic para abrir)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "panels": [],
+      "title": "2. Tabla Maestra de Servidores Monitorizados (Haz clic en el nombre de cualquier servidor para ir a su Dashboard de 26 Paneles)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "color-text" },
+            "inspect": false
+          },
+          "links": [
+            {
+              "title": "🔍 Ver los 26 paneles detallados de ${__data.fields.Servidor}",
+              "url": "/d/oratui-full-observability-poc?var-host=${__data.fields.Servidor}"
+            }
+          ],
+          "mappings": [
+            {
+              "options": {
+                "1": { "color": "green", "index": 0, "text": "ONLINE (Ver 26 Paneles ➔)" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "id": 5,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_info{host=~\"$host\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Inventario en Vivo de Servidores Oracle (Haz clic en cualquier fila para abrir su Dashboard Detallado de 26 Paneles)",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "application": true,
+              "instance": true,
+              "job": true
+            },
+            "indexByName": {
+              "env": 0,
+              "host": 1,
+              "cluster": 2,
+              "topology": 3,
+              "oracle_version": 4,
+              "oracle_home": 5,
+              "grid_home": 6,
+              "Value": 7
+            },
+            "renameByName": {
+              "Value": "Acceso Directo (Drill-Down)",
+              "cluster": "Cluster / Grupo",
+              "env": "Entorno",
+              "grid_home": "GRID_HOME",
+              "host": "Servidor",
+              "oracle_home": "ORACLE_HOME",
+              "oracle_version": "Versión Oracle",
+              "topology": "Topología"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 102,
+      "panels": [],
+      "title": "3. Top Capacidad y Salud de Almacenamiento de Toda la Flota (Tablespaces, ASM, FRA, Inodos & SAN Multipath)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Abrir 26 paneles de ${__field.labels.host}",
+              "url": "/d/oratui-full-observability-poc?var-host=${__field.labels.host}"
+            }
+          ],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "orange", "value": 85 },
+              { "color": "red", "value": 92 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 15 },
+      "id": 6,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "topk(15, oratui_tablespace_used_percent{host=~\"$host\"})",
+          "legendFormat": "[{{host}}] {{tablespace}} ({{type}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 15 Tablespaces más Llenos de Toda la Flota (%)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Abrir 26 paneles de ${__field.labels.host}",
+              "url": "/d/oratui-full-observability-poc?var-host=${__field.labels.host}"
+            }
+          ],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 88 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
+      "id": 7,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "topk(15, oratui_asm_diskgroup_used_percent{host=~\"$host\"})",
+          "legendFormat": "[{{host}}] ASM +{{diskgroup}}",
+          "refId": "A"
+        },
+        {
+          "expr": "topk(15, oratui_instance_fra_used_percent{host=~\"$host\"})",
+          "legendFormat": "[{{host}}] FRA {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Top ASM Diskgroups & FRA % de Toda la Flota",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Abrir 26 paneles de ${__field.labels.host}",
+              "url": "/d/oratui-full-observability-poc?var-host=${__field.labels.host}"
+            }
+          ],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
+      "id": 8,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "topk(10, oratui_filesystem_used_percent{host=~\"$host\"})",
+          "legendFormat": "[{{host}}] Espacio {{mountpoint}}",
+          "refId": "A"
+        },
+        {
+          "expr": "topk(10, oratui_filesystem_inodes_used_percent{host=~\"$host\"})",
+          "legendFormat": "[{{host}}] Inodos {{mountpoint}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Top Filesystems e Inodos de Toda la Flota (%)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "id": 9,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_os_metric_used_percent{host=~\"$host\", category=~\"CPU.*|RAM.*\"}",
+          "legendFormat": "[{{host}}] {{component}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Comparativa de Carga CPU & Memoria RAM entre Servidores",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Abrir 26 paneles de ${__field.labels.host}",
+              "url": "/d/oratui-full-observability-poc?var-host=${__field.labels.host}"
+            }
+          ],
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 1, "text": "DEGRADED / FAULTY" },
+                "1": { "color": "green", "index": 0, "text": "ALL PATHS OK" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "id": 10,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_storage_path_healthy{host=~\"$host\"}",
+          "legendFormat": "[{{host}}] {{name}} -> {{paths_summary}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Salud Global de Caminos SAN Multipath & HBA FC por Servidor",
+      "type": "stat"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["oracle", "fleet", "multi-server", "oratui", "poc"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+        "definition": "label_values(oratui_info, env)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "1. Entorno",
+        "multi": true,
+        "name": "env",
+        "options": [],
+        "query": { "query": "label_values(oratui_info, env)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+        "definition": "label_values(oratui_info, cluster)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "2. Cluster / BD",
+        "multi": true,
+        "name": "cluster",
+        "options": [],
+        "query": { "query": "label_values(oratui_info, cluster)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+        "definition": "label_values(oratui_info{cluster=~\"$cluster\"}, host)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "3. Filtrar Servidores",
+        "multi": true,
+        "name": "host",
+        "options": [],
+        "query": { "query": "label_values(oratui_info{cluster=~\"$cluster\"}, host)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "01. Vista Global Multi-Servidor — Flota Oracle & SAN (ora-tui)",
+  "uid": "oratui-fleet-overview",
+  "version": 1
+}

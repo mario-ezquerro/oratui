@@ -1,0 +1,3 @@
+// Copia de referencia del Jenkinsfile principal ubicado en la raíz del repositorio.
+// Puedes apuntar tu Pipeline de Jenkins tanto a "Jenkinsfile" como a "POC/jenkins/Jenkinsfile".
+load "${WORKSPACE}/Jenkinsfile"

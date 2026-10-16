@@ -335,63 +335,57 @@ sudo systemctl restart ora-tui-otel
 
 ---
 
-## Carpeta `POC/` Lista para Montar en un Servidor con Docker (`configure-poc.sh`)
+## Carpeta `POC/` Multi-Servidor: Prometheus + Grafana (2 Niveles) + Ansible + Jenkins
 
-En la carpeta **[`POC/`](file:///Users/mario/repositorios/oratui/POC)** del repositorio (y también instalada automáticamente en **`/usr/share/ora-tui/POC/`** al instalar el paquete `.rpm` o `.deb`) tienes todo preparado para copiarla a cualquier máquina con Docker y levantar **Prometheus + 15 Reglas de Alerta + Grafana con 26 gráficas autoprovisionadas**:
+En la carpeta **[`POC/`](file:///Users/mario/repositorios/oratui/POC)** del repositorio (y también instalada automáticamente en **`/usr/share/ora-tui/POC/`** al instalar el paquete `.rpm` o `.deb`) tienes todo preparado para monitorizar desde **1 servidor** hasta **una flota entera de servidores Oracle** sin perder ni un solo detalle de las 26 gráficas:
 
-### 1. Copiar la carpeta `POC` al servidor con Docker
+### 1. Organización Multi-Servidor en Grafana (2 Dashboards Enlazados con *Drill-Down*)
+* **Nivel 1 (Home Dashboard) — [`01. Vista Global Multi-Servidor — Flota Oracle & SAN`](file:///Users/mario/repositorios/oratui/POC/grafana/dashboards/oratui_fleet_overview.json)**:
+  Muestra en una sola vista el estado de todos tus servidores Oracle, una **Tabla Maestra de Inventario en Vivo**, el mapa de instancias/bloqueos/errores `ORA-`/caminos SAN y los `Top 15` tablespaces, diskgroups ASM, FRAs e inodos más llenos de toda la infraestructura. **Al hacer clic sobre cualquier servidor, Grafana abre automáticamente el Dashboard Nivel 2 filtrado para esa máquina**.
+* **Nivel 2 (Detalle Completo por Servidor) — [`02. Detalle Completo de Servidor (26 Paneles)`](file:///Users/mario/repositorios/oratui/POC/grafana/dashboards/oratui_full_poc_dashboard.json)**:
+  Mantiene las **26 gráficas exhaustivas** pero incorpora en la parte superior **3 desplegables jerárquicos encadenados (`1. Entorno` $\rightarrow$ `2. Cluster / BD` $\rightarrow$ `3. Servidor Oracle`)** con selección individual por defecto para no mezclar métricas de distintos servidores, además de un botón arriba a la derecha para volver a la Vista Global de Flota.
+* **Autodescubrimiento en caliente en Prometheus (`file_sd_configs`)**:
+  [`POC/prometheus/prometheus.yml`](file:///Users/mario/repositorios/oratui/POC/prometheus/prometheus.yml) lee dinámicamente [`POC/prometheus/targets.yml`](file:///Users/mario/repositorios/oratui/POC/prometheus/targets.yml) cada 15 segundos sin necesidad de reiniciar el contenedor, y evalúa las **15 reglas de alarma** de [`POC/prometheus/oracle_alerts.yml`](file:///Users/mario/repositorios/oratui/POC/prometheus/oracle_alerts.yml).
+
+### 2. Tres Formas de Desplegar y Mantener la Flota
+
+#### Opción A — Script Interactivo (`./configure-poc.sh` / `./start-poc.sh`)
+Copia la carpeta `POC/` a tu servidor con Docker y ejecuta:
 ```bash
-# Desde el servidor Oracle donde instalaste ora-tui:
-scp -r /usr/share/ora-tui/POC usuario@servidor-docker:~/POC
-
-# O clonando directamente el repositorio en el servidor Docker:
-git clone https://github.com/mario-ezquerro/oratui.git
-cd oratui/POC
-```
-
-### 2. Ejecutar el script interactivo `./configure-poc.sh` (o `./start-poc.sh`)
-Cada vez que ejecutes el script, **te pedirá interactivamente el nombre o IP del host Oracle a monitorizar** (y el puerto, por defecto `9161`), generará [`POC/prometheus/prometheus.yml`](file:///Users/mario/repositorios/oratui/POC/prometheus/prometheus.yml), verificará la conexión HTTP contra `ora-tui` y levantará/recargará los contenedores de Prometheus y Grafana:
-
-```bash
-cd ~/POC
+cd POC
 chmod +x configure-poc.sh start-poc.sh
 ./configure-poc.sh
 ```
+Cada vez que lo ejecutes te permitirá **añadir un servidor Oracle interactivamente** (pidiendo `Host/IP`, `Puerto` y `Entorno: PROD/PRE/DES`), sincronizar desde el inventario de Ansible o levantar/recargar Prometheus y Grafana.
 
-Salida interactiva:
-```text
-==========================================================================
-  CONFIGURACIÓN DE LA POC ORA-TUI (PROMETHEUS + GRAFANA)
-==========================================================================
+#### Opción B — Automatización Completa con Ansible ([`POC/ansible/`](file:///Users/mario/repositorios/oratui/POC/ansible))
+Defines todas tus máquinas con Oracle bajo `[oracle_servers]` y tu máquina central Docker bajo `[monitoring_server]` en un único inventario **[`POC/ansible/inventory.ini`](file:///Users/mario/repositorios/oratui/POC/ansible/inventory.ini)**:
+```ini
+[oracle_servers]
+ora-prod-rac01.local  ansible_host=192.168.10.11  env=PROD  cluster_label=rac-prod  otel_port=9161
+ora-prod-rac02.local  ansible_host=192.168.10.12  env=PROD  cluster_label=rac-prod  otel_port=9161
+ora-pre-db01.local    ansible_host=192.168.20.11  env=PRE   cluster_label=single-pre otel_port=9161
 
-👉 Introduce el nombre o IP del host Oracle a monitorizar [servidor-oracle.local]: 192.168.1.50
-👉 Introduce el puerto OpenTelemetry de ora-tui [9161]: 9161
-
->>> Generando configuración de Prometheus para monitorizar: 192.168.1.50:9161 ...
->>> Verificando conexión con http://192.168.1.50:9161/healthz ...
-    [OK] Conexión exitosa con ora-tui en 192.168.1.50:9161.
->>> Levantando / recargando contenedores Docker (Prometheus + Grafana)...
+[monitoring_server]
+monitor-server.local  ansible_host=192.168.10.100
 ```
-*(Si más adelante deseas apuntar la POC a otro servidor Oracle distinto, basta con volver a ejecutar `./configure-poc.sh` e introducir el nuevo host).*
+Y ejecutas el playbook **[`POC/ansible/site.yml`](file:///Users/mario/repositorios/oratui/POC/ansible/site.yml)**:
+```bash
+cd POC/ansible
+# Instala/mantiene el daemon systemd "ora-tui-otel" en [oracle_servers] y genera automáticamente
+# prometheus/targets.yml + levanta Prometheus y Grafana en [monitoring_server]:
+ansible-playbook -i inventory.ini site.yml
 
-### 3. Acceder a Grafana y Prometheus
-* **Grafana (`http://<IP_SERVIDOR_DOCKER>:3000`, usuario `admin` / `admin`)**: Abre directamente en portada el dashboard **`POC - Oracle Cluster, DB, ASM & Linux/SAN Full Observability (ora-tui)`** con 26 paneles.
-* **Prometheus (`http://<IP_SERVIDOR_DOCKER>:9090/alerts`)**: Muestra en vivo el estado de las **15 reglas de alarma** incluidas en [`POC/prometheus/oracle_alerts.yml`](file:///Users/mario/repositorios/oratui/POC/prometheus/oracle_alerts.yml):
-  0. `OraTuiExporterDown` (`up{job=~"oracle-oratui.*"} == 0`)
-  1. `OracleInstanceDown` (`oratui_instance_up < 1`)
-  2. `OracleClusterDaemonDown` (`oratui_cluster_node_up == 0` o `oratui_cluster_daemon_up == 0`)
-  3. `OraclePDBNotOpen` (`oratui_pdb_up == 0`)
-  4. `OracleTablespaceWarning` (`>= 85%`) y `OracleTablespaceCritical` (`>= 92%` real con `AUTOEXTEND`)
-  5. `OracleFRASpaceCritical` (`oratui_instance_fra_used_percent >= 85`)
-  6. `OracleBlockingSessionsDetected` (`oratui_sessions_blocking_locks_total > 0` durante `2m`)
-  7. `OracleASMDiskgroupCritical` (`oratui_asm_diskgroup_used_percent >= 88` o `oratui_asm_diskgroup_offline_disks > 0`)
-  8. `OracleListenerDown` (`oratui_listener_up == 0`)
-  9. `OracleAlertLogORAError` (`oratui_alert_ora_errors_total > 0`)
-  10. `OracleRMANBackupFailed` (`oratui_rman_backup_status == 0`)
-  11. `OracleDataGuardSyncIssue` (`oratui_dataguard_mrp_up == 0` o `oratui_dataguard_apply_lag_seconds > 300`)
-  12. `LinuxServerHealthDegraded` (`oratui_os_metric_healthy == 0` — Load, RAM, Swap, THP o Kernel AIO)
-  13. `LinuxFilesystemOrInodesCritical` (`oratui_filesystem_used_percent >= 90` o `oratui_filesystem_inodes_used_percent >= 85` — previene `ORA-09925`)
-  14. `LinuxSANMultipathPathDown` (`oratui_storage_path_healthy == 0` — alerta inmediata si cae un camino de fibra SAN/Multipath)
+# O solo refrescar la lista de servidores en Prometheus/Grafana en caliente:
+ansible-playbook -i inventory.ini site.yml --tags monitoring
+```
+
+#### Opción C — Pipeline CI/CD y Gobierno de Flota en Jenkins ([`Jenkinsfile`](file:///Users/mario/repositorios/oratui/Jenkinsfile) y [`POC/jenkins/`](file:///Users/mario/repositorios/oratui/POC/jenkins/README.md))
+Apunta un Job de tipo **Pipeline** en Jenkins al repositorio (`Script Path: Jenkinsfile`). Desde el botón **Build with Parameters** podrás:
+* **`DEPLOY_ALL_ANSIBLE`**: Instalar y mantener los daemons `ora-tui-otel` en `[oracle_servers]` y actualizar Prometheus + Grafana en `[monitoring_server]`.
+* **`FULL_CI_CD_AND_DEPLOY`**: Compilar el binario estático en Go (`CGO_ENABLED=0`), ejecutar los tests unitarios, generar los paquetes `.rpm`/`.deb` y desplegarlos con Ansible.
+* **`ADD_NEW_ORACLE_SERVER`**: Dar de alta un nuevo servidor Oracle desde el formulario web de Jenkins (lo añade a `inventory.ini`, le instala el daemon por Ansible y actualiza `targets.yml` en Prometheus en caliente).
+* **`UPDATE_MONITORING_TARGETS_ONLY`**, **`UPDATE_ORACLE_DAEMONS_ONLY`** y **`HEALTH_CHECK_FLEET`** (comprobación `/healthz` de toda la flota).
 
 ---
 
@@ -428,13 +422,16 @@ ora-tui/
 │   ├── actions/                   # Flujos de parada/arranque, Node Drain, mantenimiento DBA, RMAN, ADRCI y SAN
 │   ├── executor/runner.go         # Ejecutor de comandos con cambio de UID/GID y streaming en vivo
 │   └── ui/                        # Interfaz tview/tcell con ratón SSH, ventana de resultados y 4 temas retro
-├── POC/                           # Carpeta lista para copiar a un servidor Docker (Prometheus + Grafana POC)
-│   ├── configure-poc.sh           # Script interactivo que pide el host Oracle a monitorizar y levanta Docker
+├── Jenkinsfile                    # Pipeline declarativo de Jenkins para CI/CD y gobierno de flota con Ansible
+├── POC/                           # Stack completo Multi-Servidor (Docker + Prometheus + Grafana + Ansible + Jenkins)
+│   ├── configure-poc.sh           # Script interactivo multi-servidor y lanzador de Ansible
 │   ├── start-poc.sh               # Script de configuración interactiva y arranque de contenedores
-│   ├── docker-compose.yml         # Stack Docker Compose con autoprovisionamiento de Grafana y Prometheus
-│   ├── README.md                  # Guía detallada paso a paso de la POC
-│   ├── prometheus/                # prometheus.yml y oracle_alerts.yml (15 reglas de alarma)
-│   └── grafana/                   # Datasource automático y Dashboard completo de 26 paneles (Home Dashboard)
+│   ├── docker-compose.yml         # Stack Docker Compose con Prometheus (file_sd) y Grafana (2 Dashboards)
+│   ├── README.md                  # Guía detallada paso a paso de la POC Multi-Servidor
+│   ├── ansible/                   # Automatización Ansible (inventory.ini, site.yml y plantilla targets.yml.j2)
+│   ├── jenkins/                   # Documentación y Jenkinsfile para gestión desde Jenkins
+│   ├── prometheus/                # prometheus.yml (file_sd_configs), targets.yml y oracle_alerts.yml (15 alertas)
+│   └── grafana/                   # Datasource y 2 Dashboards (01. Flota Global + 02. Detalle 26 Paneles)
 ├── monitoring/                    # Plantillas independientes de Prometheus, Alertas y Dashboard de Grafana
 ├── packaging/                     # nfpm.yaml, ora-tui.spec, sudoers.ora-tui y ora-tui-otel.service (systemd)
 ├── dist/                          # Paquetes precompilados (.rpm y .deb) listos para instalar desde GitHub

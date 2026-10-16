@@ -16,7 +16,20 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "⬅ Volver a Vista Global Multi-Servidor (Flota)",
+      "tooltip": "Volver al mapa global de todos los servidores Oracle",
+      "type": "link",
+      "url": "/d/oratui-fleet-overview"
+    }
+  ],
   "panels": [
     {
       "collapsed": false,
@@ -1084,13 +1097,48 @@
       {
         "current": { "selected": true, "text": "All", "value": "$__all" },
         "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
-        "definition": "label_values(oratui_info, host)",
+        "definition": "label_values(oratui_info, env)",
         "hide": 0,
         "includeAll": true,
+        "label": "1. Entorno",
         "multi": true,
+        "name": "env",
+        "options": [],
+        "query": { "query": "label_values(oratui_info, env)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+        "definition": "label_values(oratui_info, cluster)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "2. Cluster / BD",
+        "multi": true,
+        "name": "cluster",
+        "options": [],
+        "query": { "query": "label_values(oratui_info, cluster)", "refId": "StandardVariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+        "definition": "label_values(oratui_info{cluster=~\"$cluster\"}, host)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "3. Servidor Oracle",
+        "multi": false,
         "name": "host",
         "options": [],
-        "query": { "query": "label_values(oratui_info, host)", "refId": "StandardVariableQuery" },
+        "query": { "query": "label_values(oratui_info{cluster=~\"$cluster\"}, host)", "refId": "StandardVariableQuery" },
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1100,7 +1148,7 @@
     ]
   },
   "time": { "from": "now-1h", "to": "now" },
-  "title": "POC - Oracle Cluster, DB, ASM & Linux/SAN Full Observability (ora-tui)",
+  "title": "02. Detalle Completo de Servidor (26 Paneles) — Oracle Cluster, DB, ASM & Linux/SAN (ora-tui)",
   "uid": "oratui-full-observability-poc",
   "version": 1
 }

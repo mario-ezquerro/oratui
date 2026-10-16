@@ -39,6 +39,12 @@ contents:
       mode: 0644
       owner: root
       group: root
+  - src: ./Jenkinsfile
+    dst: /usr/share/ora-tui/Jenkinsfile
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
   - src: ./POC/docker-compose.yml
     dst: /usr/share/ora-tui/POC/docker-compose.yml
     file_info:
@@ -75,6 +81,12 @@ contents:
       mode: 0644
       owner: root
       group: root
+  - src: ./POC/prometheus/targets.yml
+    dst: /usr/share/ora-tui/POC/prometheus/targets.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
   - src: ./POC/prometheus/oracle_alerts.yml
     dst: /usr/share/ora-tui/POC/prometheus/oracle_alerts.yml
     file_info:
@@ -93,8 +105,50 @@ contents:
       mode: 0644
       owner: root
       group: root
+  - src: ./POC/grafana/dashboards/oratui_fleet_overview.json
+    dst: /usr/share/ora-tui/POC/grafana/dashboards/oratui_fleet_overview.json
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
   - src: ./POC/grafana/dashboards/oratui_full_poc_dashboard.json
     dst: /usr/share/ora-tui/POC/grafana/dashboards/oratui_full_poc_dashboard.json
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/ansible/ansible.cfg
+    dst: /usr/share/ora-tui/POC/ansible/ansible.cfg
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/ansible/inventory.ini
+    dst: /usr/share/ora-tui/POC/ansible/inventory.ini
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/ansible/site.yml
+    dst: /usr/share/ora-tui/POC/ansible/site.yml
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/ansible/templates/targets.yml.j2
+    dst: /usr/share/ora-tui/POC/ansible/templates/targets.yml.j2
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/jenkins/Jenkinsfile
+    dst: /usr/share/ora-tui/POC/jenkins/Jenkinsfile
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./POC/jenkins/README.md
+    dst: /usr/share/ora-tui/POC/jenkins/README.md
     file_info:
       mode: 0644
       owner: root

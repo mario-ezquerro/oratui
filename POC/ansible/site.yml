@@ -1,0 +1,262 @@
+---
+# ==============================================================================
+# Playbook Maestro de Observabilidad Oracle con ora-tui (v1.6.0)
+#
+# Uso completo (instala daemon en servidores Oracle + actualiza Prometheus/Grafana):
+#   ansible-playbook -i inventory.ini site.yml
+#
+# Solo actualizar listado de servidores en Prometheus/Grafana:
+#   ansible-playbook -i inventory.ini site.yml --tags monitoring
+#
+# Solo instalar/actualizar el daemon ora-tui-otel en los servidores Oracle:
+#   ansible-playbook -i inventory.ini site.yml --tags oracle
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# PLAY 1: Instalar y mantener el daemon "ora-tui-otel" en [oracle_servers]
+# ------------------------------------------------------------------------------
+- name: "1. Desplegar y mantener el Daemon OpenTelemetry de ora-tui en Servidores Oracle"
+  hosts: oracle_servers
+  become: true
+  tags:
+    - oracle
+    - daemon
+  vars:
+    node_otel_port: "{{ otel_port | default(default_otel_port | default(9161)) }}"
+    node_interval: "{{ oratui_scrape_interval | default('10s') }}"
+    local_rpm_path: "{{ playbook_dir }}/../../dist/ora-tui-1.6.0-1.x86_64.rpm"
+    local_deb_path: "{{ playbook_dir }}/../../dist/ora-tui_1.6.0-1_amd64.deb"
+
+  tasks:
+    - name: Comprobar si existe el paquete RPM compilado localmente en el nodo de control
+      ansible.builtin.stat:
+        path: "{{ local_rpm_path }}"
+      delegate_to: localhost
+      become: false
+      register: local_rpm_stat
+      run_once: true
+
+    - name: Comprobar si existe el paquete DEB compilado localmente en el nodo de control
+      ansible.builtin.stat:
+        path: "{{ local_deb_path }}"
+      delegate_to: localhost
+      become: false
+      register: local_deb_stat
+      run_once: true
+
+    - name: Copiar paquete RPM local al servidor Oracle (RHEL / Oracle Linux / Rocky)
+      ansible.builtin.copy:
+        src: "{{ local_rpm_path }}"
+        dest: /tmp/ora-tui-1.6.0-1.x86_64.rpm
+        mode: "0644"
+      when:
+        - ansible_os_family == "RedHat"
+        - local_rpm_stat.stat.exists
+
+    - name: Descargar paquete RPM desde GitHub si no existe localmente
+      ansible.builtin.get_url:
+        url: "{{ oratui_rpm_url }}?t={{ ansible_date_time.epoch }}"
+        dest: /tmp/ora-tui-1.6.0-1.x86_64.rpm
+        mode: "0644"
+        force: true
+      when:
+        - ansible_os_family == "RedHat"
+        - not local_rpm_stat.stat.exists
+
+    - name: Instalar / Actualizar paquete RPM de ora-tui (RHEL / Oracle Linux)
+      ansible.builtin.command: >
+        rpm -Uvh --replacepkgs --force /tmp/ora-tui-1.6.0-1.x86_64.rpm
+      register: rpm_install
+      changed_when: "'ora-tui' in rpm_install.stdout"
+      when: ansible_os_family == "RedHat"
+
+    - name: Copiar paquete DEB local al servidor Oracle (Debian / Ubuntu)
+      ansible.builtin.copy:
+        src: "{{ local_deb_path }}"
+        dest: /tmp/ora-tui_1.6.0-1_amd64.deb
+        mode: "0644"
+      when:
+        - ansible_os_family == "Debian"
+        - local_deb_stat.stat.exists
+
+    - name: Descargar paquete DEB desde GitHub si no existe localmente
+      ansible.builtin.get_url:
+        url: "{{ oratui_deb_url }}?t={{ ansible_date_time.epoch }}"
+        dest: /tmp/ora-tui_1.6.0-1_amd64.deb
+        mode: "0644"
+        force: true
+      when:
+        - ansible_os_family == "Debian"
+        - not local_deb_stat.stat.exists
+
+    - name: Instalar / Actualizar paquete DEB de ora-tui (Debian / Ubuntu)
+      ansible.builtin.apt:
+        deb: /tmp/ora-tui_1.6.0-1_amd64.deb
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Configurar unidad systemd /etc/systemd/system/ora-tui-otel.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ora-tui-otel.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=ORA-TUI OpenTelemetry & Prometheus Exporter Daemon for Oracle DB/RAC & Linux SAN
+          Documentation=https://github.com/mario-ezquerro/oratui
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=root
+          Group=root
+          Environment="ORA_TUI_PORT={{ node_otel_port }}"
+          Environment="ORA_TUI_INTERVAL={{ node_interval }}"
+          ExecStart=/bin/sh -c 'exec /usr/bin/ora-tui --opentelemetry --daemon --otel-port=${ORA_TUI_PORT} --interval=${ORA_TUI_INTERVAL}'
+          Restart=always
+          RestartSec=10
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=ora-tui-otel
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Reiniciar ora-tui-otel
+
+    - name: Recargar systemd, habilitar y arrancar servicio ora-tui-otel
+      ansible.builtin.systemd:
+        name: ora-tui-otel
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Comprobar si firewalld está en ejecución
+      ansible.builtin.command: systemctl is-active firewalld
+      register: firewalld_state
+      failed_when: false
+      changed_when: false
+
+    - name: Abrir puerto {{ node_otel_port }}/tcp en firewalld si está activo
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - "firewall-cmd --add-port={{ node_otel_port }}/tcp --permanent"
+        - "firewall-cmd --reload"
+      when: firewalld_state.rc == 0
+      changed_when: true
+
+    - name: Verificar que el endpoint local http://127.0.0.1:{{ node_otel_port }}/healthz responde OK
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_otel_port }}/healthz"
+        return_content: true
+        status_code: 200
+      register: health_check
+      retries: 3
+      delay: 2
+      until: health_check.status == 200
+
+  handlers:
+    - name: Reiniciar ora-tui-otel
+      ansible.builtin.systemd:
+        name: ora-tui-otel
+        daemon_reload: true
+        state: restarted
+
+
+# ------------------------------------------------------------------------------
+# PLAY 2: Desplegar y mantener Prometheus + Grafana en [monitoring_server]
+#         usando automáticamente la lista de servidores de [oracle_servers]
+# ------------------------------------------------------------------------------
+- name: "2. Configurar e Iniciar Prometheus y Grafana Multi-Servidor en el Servidor de Monitorización"
+  hosts: monitoring_server
+  become: true
+  tags:
+    - monitoring
+    - prometheus
+    - grafana
+  vars:
+    target_dir: "{{ poc_install_dir | default('/opt/oratui-poc') }}"
+
+  tasks:
+    - name: Crear estructura de directorios para Prometheus y Grafana en {{ target_dir }}
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ target_dir }}"
+        - "{{ target_dir }}/prometheus"
+        - "{{ target_dir }}/grafana/provisioning/datasources"
+        - "{{ target_dir }}/grafana/provisioning/dashboards"
+        - "{{ target_dir }}/grafana/dashboards"
+
+    - name: Copiar ficheros base de la POC (docker-compose.yml, alertas y dashboards de Grafana)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../{{ item.src }}"
+        dest: "{{ target_dir }}/{{ item.dest }}"
+        mode: "{{ item.mode | default('0644') }}"
+      loop:
+        - { src: "docker-compose.yml", dest: "docker-compose.yml" }
+        - { src: ".env", dest: ".env" }
+        - { src: "prometheus/prometheus.yml", dest: "prometheus/prometheus.yml" }
+        - { src: "prometheus/oracle_alerts.yml", dest: "prometheus/oracle_alerts.yml" }
+        - { src: "grafana/provisioning/datasources/datasource.yml", dest: "grafana/provisioning/datasources/datasource.yml" }
+        - { src: "grafana/provisioning/dashboards/dashboard.yml", dest: "grafana/provisioning/dashboards/dashboard.yml" }
+        - { src: "grafana/dashboards/oratui_fleet_overview.json", dest: "grafana/dashboards/oratui_fleet_overview.json" }
+        - { src: "grafana/dashboards/oratui_full_poc_dashboard.json", dest: "grafana/dashboards/oratui_full_poc_dashboard.json" }
+
+    - name: Generar dinámicamente prometheus/targets.yml con todos los servidores de [oracle_servers]
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/templates/targets.yml.j2"
+        dest: "{{ target_dir }}/prometheus/targets.yml"
+        mode: "0644"
+
+    - name: Comprobar si Docker está instalado en el servidor de monitorización
+      ansible.builtin.command: docker --version
+      register: docker_check
+      failed_when: false
+      changed_when: false
+
+    - name: Instalar Docker en RHEL / Oracle Linux / Rocky si no está presente
+      ansible.builtin.shell: |
+        dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo || true
+        dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin || dnf install -y podman-docker
+        systemctl enable --now docker || true
+      when:
+        - docker_check.rc != 0
+        - ansible_os_family == "RedHat"
+
+    - name: Instalar Docker en Debian / Ubuntu si no está presente
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - docker-compose-v2
+        state: present
+        update_cache: true
+      when:
+        - docker_check.rc != 0
+        - ansible_os_family == "Debian"
+
+    - name: Levantar / Actualizar contenedores de Prometheus y Grafana con Docker Compose
+      ansible.builtin.shell: |
+        cd "{{ target_dir }}"
+        if docker compose version >/dev/null 2>&1; then
+          docker compose up -d
+        else
+          docker-compose up -d
+        fi
+      register: compose_up
+      changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr or 'Recreated' in compose_up.stderr"
+
+    - name: Mostrar resumen de acceso a Grafana y Prometheus Multi-Servidor
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================================="
+          - "  STACK MULTI-SERVIDOR ORA-TUI DESPLEGADO CORRECTAMENTE"
+          - "=========================================================================="
+          - "  Servidores Oracle monitorizados ({{ groups['oracle_servers'] | length }}): {{ groups['oracle_servers'] | join(', ') }}"
+          - "  Grafana (Vista Global Flota + Detalle 26 Paneles): http://{{ ansible_host | default(inventory_hostname) }}:3000 (admin / admin)"
+          - "  Prometheus (Targets Auto-Descubiertos):            http://{{ ansible_host | default(inventory_hostname) }}:9090/targets"
+          - "  Prometheus (15 Reglas de Alarma):                  http://{{ ansible_host | default(inventory_hostname) }}:9090/alerts"
+          - "=========================================================================="

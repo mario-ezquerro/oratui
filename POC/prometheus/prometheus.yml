@@ -1,39 +1,36 @@
 # ==============================================================================
-# POC Prometheus Configuration for ora-tui OpenTelemetry / Prometheus Exporter
+# POC Prometheus Configuration (Multi-Server Dynamic File Service Discovery)
 # ==============================================================================
 global:
   scrape_interval: 10s
   evaluation_interval: 10s
   external_labels:
     monitor: 'oratui-poc'
-    environment: 'oracle-server'
 
 rule_files:
   - "/etc/prometheus/oracle_alerts.yml"
 
 scrape_configs:
-  # 1. Scrape del servidor Oracle remoto o local donde corre:
-  #    ora-tui --opentelemetry --daemon --otel-port=9161
+  # 1. Flota de Servidores Oracle descubiertos dinámicamente desde targets.yml
+  #    (Actualizado en caliente por Ansible, Jenkins o ./configure-poc.sh sin reiniciar Prometheus)
   - job_name: 'oracle-oratui-poc'
     scrape_interval: 10s
-    scrape_timeout: 9s
+    scrape_timeout: 8s
     metrics_path: '/metrics'
-    static_configs:
-      - targets:
-          # Por defecto apunta a servidor-oracle.local:9161 (se configura interactivamente con ./configure-poc.sh)
-          - 'servidor-oracle.local:9161'
-        labels:
-          application: 'ora-tui'
-          role: 'oracle-database-server'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets.yml'
+        refresh_interval: 15s
 
-  # 2. Scrape automático del propio host Docker (por si Docker corre en la misma máquina que ora-tui)
+  # 2. Scrape automático del propio host Docker (por si ora-tui corre en la misma máquina)
   - job_name: 'oracle-oratui-local-host'
     scrape_interval: 10s
-    scrape_timeout: 9s
+    scrape_timeout: 8s
     metrics_path: '/metrics'
     static_configs:
       - targets:
           - 'host.docker.internal:9161'
         labels:
           application: 'ora-tui'
+          env: 'LOCAL'
           role: 'oracle-local-host'
