@@ -70,6 +70,21 @@ ora-des-db01.local    ansible_host=192.168.30.11  env=DES   cluster_label=single
             description: 'Intervalo de recolección del daemon ora-tui en cada servidor Oracle'
         )
         string(
+            name: 'FLUTTER_WEB_USER',
+            defaultValue: 'admin',
+            description: 'Usuario de acceso para Flutter Web Command Center (:8088), Grafana (:3000) y API de los agentes Oracle (:9161)'
+        )
+        password(
+            name: 'FLUTTER_WEB_PASSWORD',
+            defaultValue: 'admin',
+            description: 'Contraseña sincronizada para Flutter Web (:8088), Grafana (:3000) y agentes Oracle (:9161)'
+        )
+        password(
+            name: 'ORATUI_API_TOKEN',
+            defaultValue: '',
+            description: 'Token compartido opcional (X-OraTui-Token) sincronizado entre Flutter Web y todos los servidores Oracle (:9161)'
+        )
+        string(
             name: 'SSH_CREDENTIALS_ID',
             defaultValue: 'oracle-ansible-ssh',
             description: 'ID de la credencial SSH (SSH Username with private key) en Jenkins para conectar a los servidores. Dejar vacío si el nodo Jenkins ya tiene claves SSH configuradas.'
@@ -122,8 +137,13 @@ ansible_user=root
 default_otel_port=${params.DEFAULT_OTEL_PORT.trim()}
 oratui_scrape_interval=${params.SCRAPE_INTERVAL.trim()}
 poc_install_dir=/opt/oratui-poc
-oratui_rpm_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.6.0-1.x86_64.rpm
-oratui_deb_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.6.0-1_amd64.deb
+flutter_web_user=${params.FLUTTER_WEB_USER.trim()}
+flutter_web_password=${params.FLUTTER_WEB_PASSWORD}
+grafana_admin_user=${params.FLUTTER_WEB_USER.trim()}
+grafana_admin_password=${params.FLUTTER_WEB_PASSWORD}
+oratui_api_token=${params.ORATUI_API_TOKEN}
+oratui_rpm_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.8.0-1.x86_64.rpm
+oratui_deb_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.8.0-1_amd64.deb
 """
                         writeFile(file: env.INVENTORY_PATH, text: generatedInventory, encoding: 'UTF-8')
                     }
@@ -261,6 +281,8 @@ def runAnsiblePlaybook(Map cfg) {
 
     def ansibleCmd = "ansible-playbook ${extraArgs.join(' ')}"
 
+    // Si existe la credencial SSH en Jenkins, la inyectamos con withCredentials;
+    // si no existe o está vacía, ejecutamos directamente con las claves del agente Jenkins.
     if (cfg.sshCredsId?.trim()) {
         try {
             withCredentials([
