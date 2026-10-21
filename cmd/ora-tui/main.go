@@ -17,7 +17,7 @@ import (
 	"github.com/mario/ora-tui/internal/ui"
 )
 
-const AppVersion = "1.8.0"
+const AppVersion = "1.9.0"
 
 func main() {
 	mockFlag := flag.Bool("mock", false, "Force interactive mock/simulation mode with sample Oracle data")

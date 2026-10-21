@@ -1,7 +1,7 @@
 # `ora-tui` — Oracle Cluster (RAC / Restart), Single Instance, Server/SAN & OpenTelemetry Manager
 
 ![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)
-![Version](https://img.shields.io/badge/Version-1.8.0-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.9.0-brightgreen)
 ![Platform](https://img.shields.io/badge/Platform-RHEL%20%7C%20Oracle%20Linux%207%2F8%2F9%20%7C%20Debian%2FUbuntu%20%7C%20macOS%20(Mock)-red)
 ![Dependencies](https://img.shields.io/badge/CGO_ENABLED-0%20(Zero%20Deps)-success)
 ![Telemetry](https://img.shields.io/badge/OpenTelemetry%20%26%20Prometheus-Port%209161-orange)

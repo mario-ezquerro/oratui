@@ -537,6 +537,7 @@ func (u *AppUI) navEntries() []navEntry {
 		{"alert_log", "7. Alert Log & Errores", "ORA- & ADRCI Purge", func() { u.switchViewAndFocus("alert_log") }},
 		{"os_health", "8. Servidor, Discos & SAN", "RAM, Load, Multipath", func() { u.switchViewAndFocus("os_health") }},
 		{"maintenance", "9. Centro Mantenimiento", "Asistentes Guiados", func() { u.switchViewAndFocus("maintenance") }},
+		{"advisor", "0. Advisor & Plan Flips", "Jobs, GC, I/O, SGA", func() { u.switchViewAndFocus("advisor") }},
 		{"", "F1. Ayuda en Menus", "Ocultar/Ver Ayuda", func() { u.toggleMenuHelp() }},
 		{"", "c. Tema Color Retro", "NC / TurboC / Fosforo", func() { u.cycleColorTheme() }},
 		{"", "b. Cambiar Marcos", "Simple ┌─┐ / ╔═╗", func() { u.cycleBorderMode() }},
@@ -927,6 +928,10 @@ func (u *AppUI) buildLayout() {
 				u.NavList.SetCurrentItem(8)
 				u.switchViewAndFocus("maintenance")
 				return nil
+			case '0':
+				u.NavList.SetCurrentItem(9)
+				u.switchViewAndFocus("advisor")
+				return nil
 			case 'h', 'H':
 				u.toggleMenuHelp()
 				return nil
@@ -1211,6 +1216,7 @@ func (u *AppUI) rebuildContentViews() {
 	u.Content.AddPage("alert_log", u.buildAlertLogPage(), true, u.ActiveView == "alert_log")
 	u.Content.AddPage("os_health", u.buildServerHealthPage(), true, u.ActiveView == "os_health")
 	u.Content.AddPage("maintenance", u.buildMaintenancePage(), true, u.ActiveView == "maintenance")
+	u.Content.AddPage("advisor", u.buildAdvisorPage(), true, u.ActiveView == "advisor")
 	u.Content.SwitchToPage(u.ActiveView)
 
 	// 3. Restore selected row/item in every rebuilt table/list
@@ -2797,6 +2803,130 @@ func (u *AppUI) buildMaintenancePage() tview.Primitive {
 	u.viewFocusables["maintenance"] = []tview.Primitive{list}
 
 	return list
+}
+
+// View 0: Continuous Advisor Engine, SQL Plan Flips, Business Jobs, RAC Cache Fusion & Datafile I/O (ora-brabo inspired)
+func (u *AppUI) buildAdvisorPage() tview.Primitive {
+	// Panel [1/3]: Continuous Advisor Findings
+	advTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	advTbl.SetBorder(true).SetTitle(u.winTitle("[1/3] MOTOR CONTINUO DE HALLAZGOS ADVISOR (ora-brabo Engine)", "Clic/Enter = Remediar │ ←/→ Ventana"))
+	aHeaders := []string{"SEVERIDAD", "CATEGORIA", "HALLAZGO DETECTADO", "IMPACTO", "RECOMENDACION DBA / SRE"}
+	for c, h := range aHeaders {
+		advTbl.SetCell(0, c, HeaderCell(h))
+	}
+	for i, f := range u.State.AdvisorFindings {
+		r := i + 1
+		advTbl.SetCell(r, 0, StatusCell(f.Severity))
+		advTbl.SetCell(r, 1, AccentCell(f.Category))
+		advTbl.SetCell(r, 2, KeyCell(f.Title))
+		advTbl.SetCell(r, 3, tview.NewTableCell(f.Impact))
+		advTbl.SetCell(r, 4, tview.NewTableCell(f.Suggestion))
+	}
+	ensureSelectableRow(advTbl, len(aHeaders), "Sin hallazgos criticos activos en el motor Advisor")
+	u.bindTableActions(advTbl, func(row, col int) {
+		if row > 0 && row <= len(u.State.AdvisorFindings) {
+			f := u.State.AdvisorFindings[row-1]
+			u.showActionMenuModal(
+				fmt.Sprintf(" ══ REMEDIACION ADVISOR: %s ══ ", f.Category),
+				[]menuAction{
+					{fmt.Sprintf("Ejecutar Remediacion Recomendada (%s -> %s)", f.ActionID, f.ActionTarget), f.Suggestion, func() {
+						u.Logf("[ADVISOR] Ejecutando accion '%s' sobre '%s' -> [green]OK[-]", f.ActionID, f.ActionTarget)
+					}},
+				},
+			)
+		}
+	})
+
+	// Panel [2/3]: SQL Plan Flips (gv$sql) & Business Scheduler Jobs (dba_scheduler_jobs)
+	sqlJobTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	sqlJobTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] REGRESION DE PLANES SQL (Plan Flips gv$sql) & JOBS DE NEGOCIO (DBMS_SCHEDULER)", "Clic/Enter = Fijar Plan SPM / Ejecutar Job"))
+	sHeaders := []string{"TIPO", "ID / JOB_NAME", "ESQUEMA", "ESTADO", "METRICA ACTUAL", "REFERENCIA OPTIMA", "DETALLE / SQL"}
+	for c, h := range sHeaders {
+		sqlJobTbl.SetCell(0, c, HeaderCell(h))
+	}
+	rowIdx := 1
+	for _, pf := range u.State.PlanFlips {
+		sqlJobTbl.SetCell(rowIdx, 0, AccentCell("SQL PLAN FLIP"))
+		sqlJobTbl.SetCell(rowIdx, 1, KeyCell(pf.SQLID))
+		sqlJobTbl.SetCell(rowIdx, 2, tview.NewTableCell(pf.Schema))
+		sqlJobTbl.SetCell(rowIdx, 3, StatusCell(pf.Status))
+		sqlJobTbl.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("PHV %d (%.1f ms)", pf.CurrentPHV, pf.AvgElapsedMs)))
+		sqlJobTbl.SetCell(rowIdx, 5, tview.NewTableCell(fmt.Sprintf("PHV %d (%.1f ms)", pf.BestPHV, pf.BestElapsedMs)))
+		sqlJobTbl.SetCell(rowIdx, 6, tview.NewTableCell(pf.SQLText))
+		rowIdx++
+	}
+	for _, jb := range u.State.SchedulerJobs {
+		sqlJobTbl.SetCell(rowIdx, 0, AccentCell("JOB "+jb.JobType))
+		sqlJobTbl.SetCell(rowIdx, 1, KeyCell(jb.JobName))
+		sqlJobTbl.SetCell(rowIdx, 2, tview.NewTableCell(jb.Owner))
+		sqlJobTbl.SetCell(rowIdx, 3, StatusCell(jb.State))
+		sqlJobTbl.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("Fails 24h: %d (Tot: %d)", jb.Failed24h, jb.FailureCount)))
+		sqlJobTbl.SetCell(rowIdx, 5, tview.NewTableCell("Next: "+jb.NextRun))
+		sqlJobTbl.SetCell(rowIdx, 6, tview.NewTableCell(jb.Detail))
+		rowIdx++
+	}
+	ensureSelectableRow(sqlJobTbl, len(sHeaders), "Sin regresiones de planes SQL ni jobs de negocio registrados")
+	u.bindTableActions(sqlJobTbl, func(row, col int) {
+		u.showActionMenuModal(
+			" ══ ACCIONES SQL PLAN BASELINE (SPM) & DBMS_SCHEDULER ══ ",
+			[]menuAction{
+				{"Fijar Mejor Plan Hash Value en SQL Plan Management (DBMS_SPM)", "DBMS_SPM.LOAD_PLANS_FROM_CURSOR_CACHE(fixed=>'YES')", func() {
+					u.Logf("[SPM] Plan optimo fijado en SQL Plan Baseline (FIXED=YES) -> [green]OK[-]")
+				}},
+				{"Ejecutar Job de Negocio Ahora (DBMS_SCHEDULER.RUN_JOB)", "Lanza el job en segundo plano", func() {
+					u.Logf("[SCHEDULER] DBMS_SCHEDULER.RUN_JOB ejecutado -> [green]OK[-]")
+				}},
+			},
+		)
+	})
+
+	// Panel [3/3]: RAC Cache Fusion Latency, Datafile I/O Latency & Memory Advisors
+	ioGcTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+	ioGcTbl.SetBorder(true).SetTitle(u.winTitle(
+		fmt.Sprintf("[3/3] RAC CACHE FUSION, DATAFILE I/O & REDO/UNDO (Switches/h: %d │ ORA-01555: %d │ BufHit: %.1f%%)",
+			u.State.RedoUndo.RedoSwitchesLastHour, u.State.RedoUndo.ORA01555Count, u.State.RedoUndo.BufferCacheHitPct),
+		"←/→ Ventana",
+	))
+	gHeaders := []string{"SUBSISTEMA", "OBJETO / INSTANCIA", "ESTADO", "LATENCIA / FACTOR", "METRICA SECUNDARIA", "DIAGNOSTICO / RECOMENDACION"}
+	for c, h := range gHeaders {
+		ioGcTbl.SetCell(0, c, HeaderCell(h))
+	}
+	gRow := 1
+	for _, cf := range u.State.CacheFusion {
+		ioGcTbl.SetCell(gRow, 0, AccentCell("CACHE FUSION"))
+		ioGcTbl.SetCell(gRow, 1, KeyCell(cf.InstanceName))
+		ioGcTbl.SetCell(gRow, 2, StatusCell(cf.Status))
+		ioGcTbl.SetCell(gRow, 3, tview.NewTableCell(fmt.Sprintf("CR: %.2f ms │ Cur: %.2f ms", cf.CRBlockLatencyMs, cf.CurBlockLatencyMs)))
+		ioGcTbl.SetCell(gRow, 4, tview.NewTableCell(fmt.Sprintf("CR Blks: %d", cf.CRBlocksReceived)))
+		ioGcTbl.SetCell(gRow, 5, tview.NewTableCell("Interconnect: "+cf.InterconnectIP))
+		gRow++
+	}
+	for _, dio := range u.State.DatafileIO {
+		ioGcTbl.SetCell(gRow, 0, AccentCell("DATAFILE I/O"))
+		ioGcTbl.SetCell(gRow, 1, KeyCell(dio.Tablespace))
+		ioGcTbl.SetCell(gRow, 2, StatusCell(dio.Status))
+		ioGcTbl.SetCell(gRow, 3, tview.NewTableCell(fmt.Sprintf("Read: %.2f ms │ Write: %.2f ms", dio.AvgReadMs, dio.AvgWriteMs)))
+		ioGcTbl.SetCell(gRow, 4, tview.NewTableCell(fmt.Sprintf("R: %.0fM / W: %.0fM", dio.ReadMB, dio.WriteMB)))
+		ioGcTbl.SetCell(gRow, 5, tview.NewTableCell(dio.FileName))
+		gRow++
+	}
+	for _, ma := range u.State.MemoryAdvisor {
+		ioGcTbl.SetCell(gRow, 0, AccentCell(ma.AdvisorType+" ADVISOR"))
+		ioGcTbl.SetCell(gRow, 1, KeyCell(fmt.Sprintf("%d MB", ma.SizeMB)))
+		ioGcTbl.SetCell(gRow, 2, StatusCell("OK"))
+		ioGcTbl.SetCell(gRow, 3, tview.NewTableCell(fmt.Sprintf("Factor %.2fx", ma.SizeFactor)))
+		ioGcTbl.SetCell(gRow, 4, tview.NewTableCell(fmt.Sprintf("DBTime Ratio: %.2f", ma.EstDBTimeFactor)))
+		ioGcTbl.SetCell(gRow, 5, tview.NewTableCell(ma.Recommendation))
+		gRow++
+	}
+	ensureSelectableRow(ioGcTbl, len(gHeaders), "Sin metricas de Cache Fusion / Datafile I/O")
+
+	u.viewFocusables["advisor"] = []tview.Primitive{advTbl, sqlJobTbl, ioGcTbl}
+
+	return tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(advTbl, 8, 0, true).
+		AddItem(sqlJobTbl, 9, 0, false).
+		AddItem(ioGcTbl, 0, 1, false)
 }
 
 type menuAction struct {

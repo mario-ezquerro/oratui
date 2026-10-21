@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/smtp"
@@ -168,7 +169,7 @@ func maskSLOConfig(cfg SLOConfig) SLOConfig {
 	return out
 }
 
-var safeTargetRegex = regexp.MustCompile(`^[a-zA-Z0-9_.,@#$+-]{0,96}$`)
+var safeTargetRegex = regexp.MustCompile(`^[a-zA-Z0-9_.,:@/#$+-]{0,96}$`)
 
 func validateSafeTarget(target string) error {
 	t := strings.TrimSpace(target)
@@ -176,7 +177,7 @@ func validateSafeTarget(target string) error {
 		return fmt.Errorf("target inválido o con caracteres no permitidos por seguridad: %q", target)
 	}
 	upper := strings.ToUpper(t)
-	for _, forbidden := range []string{"--", "/*", "*/", ";", "'", "\"", "`", "$("} {
+	for _, forbidden := range []string{"..", "--", "/*", "*/", ";", "'", "\"", "`", "$("} {
 		if strings.Contains(upper, forbidden) {
 			return fmt.Errorf("secuencia bloqueada por política anti-inyección: %q", forbidden)
 		}
@@ -552,6 +553,46 @@ func buildDelicateAlerts(s model.EnvironmentState, now time.Time) []DelicateAler
 			ActionTarget:      s.InvalidObjects[0].Owner,
 			DetectedAt:        tsStr,
 		})
+	}
+
+	// 8. SQL Plan Instability / Plan Flips (ora-brabo inspired)
+	for _, pf := range s.PlanFlips {
+		if pf.Status == "REGRESSION" || (pf.BestElapsedMs > 0 && pf.AvgElapsedMs > pf.BestElapsedMs*2.0) {
+			sev := "WARNING"
+			if pf.Status == "REGRESSION" {
+				sev = "CRITICAL"
+			}
+			targetSpec := fmt.Sprintf("%s:%d", pf.SQLID, pf.BestPHV)
+			list = append(list, DelicateAlert{
+				ID:                "PLAN_FLIP_" + pf.SQLID,
+				Severity:          sev,
+				Category:          "SQL Plan Flip",
+				Title:             fmt.Sprintf("SQL_ID %s con regresión de plan (PHV %d -> Óptimo %d)", pf.SQLID, pf.CurrentPHV, pf.BestPHV),
+				Description:       fmt.Sprintf("Latencia actual %.1f ms vs mejor plan %.1f ms (%d planes en caché | Esquema %s).", pf.AvgElapsedMs, pf.BestElapsedMs, pf.PlanCount, pf.Schema),
+				RecommendedAction: fmt.Sprintf("Fijar Plan Óptimo %d en SPM Baseline", pf.BestPHV),
+				ActionID:          "pin_sql_plan",
+				ActionTarget:      targetSpec,
+				DetectedAt:        tsStr,
+			})
+		}
+	}
+
+	// 9. Failed Business / Application Scheduler Jobs (24h)
+	for _, jb := range s.SchedulerJobs {
+		if jb.Failed24h > 0 || strings.Contains(strings.ToUpper(jb.State), "FAIL") || strings.Contains(strings.ToUpper(jb.State), "BROKEN") {
+			jobSpec := fmt.Sprintf("%s.%s", jb.Owner, jb.JobName)
+			list = append(list, DelicateAlert{
+				ID:                "JOB_FAIL_" + jobSpec,
+				Severity:          "CRITICAL",
+				Category:          "Scheduler Job",
+				Title:             fmt.Sprintf("Job de negocio %s en estado %s (%d fallos 24h)", jobSpec, jb.State, jb.Failed24h),
+				Description:       fmt.Sprintf("Último inicio: %s | Detalle: %s", jb.LastStart, jb.Detail),
+				RecommendedAction: fmt.Sprintf("Relanzar Job (%s) vía DBMS_SCHEDULER", jobSpec),
+				ActionID:          "run_scheduler_job",
+				ActionTarget:      jobSpec,
+				DetectedAt:        tsStr,
+			})
+		}
 	}
 
 	return list
@@ -1212,6 +1253,89 @@ func (e *Exporter) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 				"echo '=== ESPACIO (MB) ==='; df -PTm; echo ''; echo '=== INODOS ==='; df -Pi")
 		}
 
+	case "pin_sql_plan":
+		target := req.Target
+		if target == "" {
+			target = "8f4k2m91x7p0q:1049281744"
+		}
+		sqlID := target
+		phv := ""
+		if idx := strings.Index(target, ":"); idx > 0 {
+			sqlID = target[:idx]
+			phv = target[idx+1:]
+		}
+		title = fmt.Sprintf("Fijar Plan Óptimo en SQL Plan Baseline (SQL_ID=%s, PHV=%s)", sqlID, phv)
+		var sql string
+		if phv != "" {
+			sql = fmt.Sprintf("DECLARE l_plans PLS_INTEGER; BEGIN l_plans := DBMS_SPM.LOAD_PLANS_FROM_CURSOR_CACHE(sql_id => '%s', plan_hash_value => %s, fixed => 'YES', enabled => 'YES'); DBMS_OUTPUT.PUT_LINE('SPM Plans Loaded & Fixed: ' || l_plans); END;\n/", sqlID, phv)
+		} else {
+			sql = fmt.Sprintf("DECLARE l_plans PLS_INTEGER; BEGIN l_plans := DBMS_SPM.LOAD_PLANS_FROM_CURSOR_CACHE(sql_id => '%s', fixed => 'YES', enabled => 'YES'); DBMS_OUTPUT.PUT_LINE('SPM Plans Loaded & Fixed: ' || l_plans); END;\n/", sqlID)
+		}
+		cmdDesc = fmt.Sprintf("DBMS_SPM.LOAD_PLANS_FROM_CURSOR_CACHE(sql_id=>'%s', plan_hash_value=>%s, fixed=>'YES')", sqlID, phv)
+		if st.IsMock {
+			appendLine("SQL> SET SERVEROUTPUT ON")
+			appendLine("SQL> " + sql)
+			appendLine("SPM Plans Loaded & Fixed: 1")
+			appendLine("PL/SQL procedure successfully completed.")
+			appendLine(fmt.Sprintf("Plan óptimo PHV=%s fijado (FIXED=YES) en SQL Plan Management para SQL_ID %s.", phv, sqlID))
+		} else {
+			_, _, execErr = runner.RunSQLPlus(ctx, oraHome, dbSID, oraCreds, "SET SERVEROUTPUT ON\n"+sql, appendLine)
+		}
+
+	case "run_scheduler_job":
+		jobSpec := req.Target
+		if jobSpec == "" {
+			jobSpec = "CRM_DATA.JOB_SYNC_CREDIT_SCORES"
+		}
+		title = fmt.Sprintf("Ejecutar Job de Negocio Ahora (DBMS_SCHEDULER.RUN_JOB %s)", jobSpec)
+		sql := fmt.Sprintf("BEGIN DBMS_SCHEDULER.RUN_JOB(job_name => '%s', use_current_session => FALSE); END;\n/", jobSpec)
+		cmdDesc = sql
+		if st.IsMock {
+			appendLine("SQL> " + sql)
+			appendLine("PL/SQL procedure successfully completed.")
+			appendLine(fmt.Sprintf("Job %s lanzado en segundo plano (Coordinator CJQ0).", jobSpec))
+		} else {
+			_, _, execErr = runner.RunSQLPlus(ctx, oraHome, dbSID, oraCreds, sql, appendLine)
+		}
+
+	case "enable_scheduler_job":
+		jobSpec := req.Target
+		if jobSpec == "" {
+			jobSpec = "CRM_DATA.JOB_SYNC_CREDIT_SCORES"
+		}
+		title = fmt.Sprintf("Habilitar Job en DBMS_SCHEDULER (%s)", jobSpec)
+		sql := fmt.Sprintf("BEGIN DBMS_SCHEDULER.ENABLE(name => '%s'); END;\n/", jobSpec)
+		cmdDesc = sql
+		if st.IsMock {
+			appendLine("SQL> " + sql)
+			appendLine("PL/SQL procedure successfully completed.")
+			appendLine(fmt.Sprintf("Job %s habilitado (ENABLED=TRUE).", jobSpec))
+		} else {
+			_, _, execErr = runner.RunSQLPlus(ctx, oraHome, dbSID, oraCreds, sql, appendLine)
+		}
+
+	case "tune_memory_advisor":
+		target := req.Target
+		if target == "" {
+			target = "SGA:40960"
+		}
+		title = fmt.Sprintf("Simulación y Recomendación de Memoria Oracle (%s)", target)
+		sql := "SELECT sga_size, sga_size_factor, estd_db_time_factor, estd_physical_reads FROM v$sga_target_advice ORDER BY sga_size;\nSELECT ROUND(pga_target_for_estimate/1048576) pga_mb, pga_target_factor, estd_pga_cache_hit_percentage, estd_overalloc_count FROM v$pga_target_advice ORDER BY 1;"
+		cmdDesc = sql
+		if st.IsMock {
+			appendLine("SQL> -- Análisis de v$sga_target_advice y v$pga_target_advice")
+			appendLine("  SGA_SIZE SGA_SIZE_FACTOR ESTD_DB_TIME_FACTOR ESTD_PHYSICAL_READS")
+			appendLine("---------- --------------- ------------------- -------------------")
+			appendLine("     24576             .75                1.18             8420000")
+			appendLine("     32768               1                1.00             4820000  <-- ACTUAL")
+			appendLine("     40960            1.25                 .86             2910000  <-- ÓPTIMO (-14% DB Time)")
+			appendLine("")
+			appendLine("Comando sugerido para ventana de cambio (con HugePages verificadas):")
+			appendLine("  ALTER SYSTEM SET SGA_TARGET=40G SCOPE=SPFILE SID='*';")
+		} else {
+			_, _, execErr = runner.RunSQLPlus(ctx, oraHome, dbSID, oraCreds, sql, appendLine)
+		}
+
 	default:
 		title = "Diagnóstico General del Servidor Oracle"
 		cmdDesc = "uname -a && uptime"
@@ -1239,3 +1363,204 @@ func (e *Exporter) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// handleExecutiveReport renders a self-contained, print-to-PDF ready HTML Executive Health Report
+// inspired by ora-brabo's executive report, combining KPIs, SRE/SLOs, Advisor Findings, SQL Plan Flips,
+// RMAN Channels, Business Jobs, RAC Cache Fusion, Datafile I/O, Memory Advisors, and SAN Multipath.
+func (e *Exporter) handleExecutiveReport(w http.ResponseWriter, r *http.Request) {
+	if enableCORS(w, r) {
+		return
+	}
+	e.mu.RLock()
+	st := e.state
+	updated := e.lastUpdated
+	slos := computeSLOs(e.totalSamples, e.goodAvailSamples, e.goodLockFreeSamples, e.goodStorageSamples, e.goodSANSamples, e.sloConfig)
+	alerts := append([]DelicateAlert(nil), e.activeAlerts...)
+	e.mu.RUnlock()
+
+	overallStatus := "SALUDABLE (HEALTHY)"
+	overallColor := "#16a34a"
+	critCount := 0
+	warnCount := 0
+	for _, f := range st.AdvisorFindings {
+		if f.Severity == "CRITICAL" {
+			critCount++
+		} else if f.Severity == "WARNING" {
+			warnCount++
+		}
+	}
+	for _, a := range alerts {
+		if a.Severity == "CRITICAL" {
+			critCount++
+		} else {
+			warnCount++
+		}
+	}
+	if critCount > 0 {
+		overallStatus = fmt.Sprintf("ATENCIÓN REQUERIDA (%d CRÍTICOS)", critCount)
+		overallColor = "#dc2626"
+	} else if warnCount > 0 {
+		overallStatus = fmt.Sprintf("ADVERTENCIA (%d AVISOS)", warnCount)
+		overallColor = "#d97706"
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Informe Ejecutivo Oracle DBA &amp; SRE - %s (%s)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .container { max-width: 1180px; margin: 0 auto; background: #1e293b; border: 2px solid #38bdf8; border-radius: 8px; padding: 28px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #334155; padding-bottom: 18px; margin-bottom: 22px; }
+    .title h1 { margin: 0 0 6px 0; color: #38bdf8; font-size: 24px; }
+    .title p { margin: 0; color: #94a3b8; font-size: 13px; }
+    .status-badge { background: %s; color: #fff; font-weight: 800; padding: 8px 16px; border-radius: 6px; font-size: 14px; display: inline-block; }
+    .btn-print { background: #38bdf8; color: #0f172a; border: none; font-weight: 800; padding: 9px 16px; border-radius: 6px; cursor: pointer; margin-left: 10px; font-size: 13px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .kpi-card { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 14px; }
+    .kpi-label { color: #94a3b8; font-size: 11px; text-transform: uppercase; font-weight: 700; }
+    .kpi-val { color: #f8fafc; font-size: 20px; font-weight: 800; margin-top: 4px; }
+    .kpi-sub { color: #38bdf8; font-size: 11px; margin-top: 2px; }
+    h2 { color: #facc15; font-size: 16px; border-bottom: 1px solid #334155; padding-bottom: 6px; margin-top: 26px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    table { width: 100%%; border-collapse: collapse; margin-bottom: 16px; font-size: 12.5px; }
+    th { background: #0f172a; color: #38bdf8; text-align: left; padding: 8px 10px; border: 1px solid #334155; font-weight: 700; }
+    td { padding: 7px 10px; border: 1px solid #334155; color: #e2e8f0; }
+    tr:nth-child(even) td { background: #162032; }
+    .sev-CRITICAL, .sev-BURNING, .sev-FAILED { background: #dc2626; color: #fff; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+    .sev-WARNING, .sev-DOWNGRADED { background: #d97706; color: #fff; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+    .sev-OK, .sev-ONLINE, .sev-HEALTHY, .sev-SUCCEEDED, .sev-INFO { background: #16a34a; color: #fff; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+    @media print {
+      body { background: #fff; color: #000; padding: 0; }
+      .container { background: #fff; border: 1px solid #ccc; box-shadow: none; max-width: 100%%; }
+      .kpi-card, th { background: #f1f5f9 !important; color: #0f172a !important; }
+      td, .kpi-val, .title h1, h2 { color: #0f172a !important; }
+      .btn-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="title">
+        <h1>INFORME EJECUTIVO DE SALUD ORACLE DBA, SRE &amp; SAN</h1>
+        <p><b>Host:</b> %s │ <b>Cluster:</b> %s (%s) │ <b>Versión Oracle:</b> %s │ <b>Generado:</b> %s (ORA-TUI v%s)</p>
+      </div>
+      <div>
+        <span class="status-badge">%s</span>
+        <button class="btn-print" onclick="window.print()">🖨️ IMPRIMIR / GUARDAR PDF</button>
+      </div>
+    </div>
+`, html.EscapeString(st.HostName), html.EscapeString(st.ClusterName), overallColor,
+		html.EscapeString(st.HostName), html.EscapeString(st.ClusterName), html.EscapeString(string(st.Topology)),
+		html.EscapeString(st.ReleaseVersion), updated.Format("2006-01-02 15:04:05"), html.EscapeString(e.version), overallStatus))
+
+	// KPIs
+	b.WriteString(fmt.Sprintf(`    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Instancias / Nodos</div><div class="kpi-val">%d Inst / %d Nodos</div><div class="kpi-sub">PDBs: %d │ Servicios: %d</div></div>
+      <div class="kpi-card"><div class="kpi-label">Buffer / PGA Cache Hit</div><div class="kpi-val">%.1f%% / %.1f%%</div><div class="kpi-sub">Hard Parses: %.1f/s</div></div>
+      <div class="kpi-card"><div class="kpi-label">Redo Switches &amp; Undo</div><div class="kpi-val">%d/h (%d/24h)</div><div class="kpi-sub">ORA-01555: %d │ %.1f MB/s</div></div>
+      <div class="kpi-card"><div class="kpi-label">SQL Plan Flips</div><div class="kpi-val">%d SQL_IDs</div><div class="kpi-sub">Regresiones en gv$sql</div></div>
+      <div class="kpi-card"><div class="kpi-label">Jobs Negocio (24h)</div><div class="kpi-val">%d Monitoreados</div><div class="kpi-sub">DBMS_SCHEDULER</div></div>
+      <div class="kpi-card"><div class="kpi-label">Hallazgos Advisor</div><div class="kpi-val">%d Activos</div><div class="kpi-sub">Motor continuo ORA-TUI</div></div>
+    </div>
+`, len(st.Instances), len(st.Nodes), len(st.PDBs), len(st.Services),
+		st.RedoUndo.BufferCacheHitPct, st.RedoUndo.PGACacheHitPct, st.RedoUndo.HardParsesPerSec,
+		st.RedoUndo.RedoSwitchesLastHour, st.RedoUndo.RedoSwitches24h, st.RedoUndo.ORA01555Count, st.RedoUndo.RedoRateMBPerSec,
+		len(st.PlanFlips), len(st.SchedulerJobs), len(st.AdvisorFindings)))
+
+	// 1. Advisor Findings
+	b.WriteString(`    <h2>1. Diagnóstico Automático &amp; Recomendaciones del Advisor (ora-brabo Engine)</h2>
+    <table>
+      <thead><tr><th>Severidad</th><th>Categoría</th><th>Hallazgo</th><th>Detalle Técnico</th><th>Recomendación DBA / SRE</th></tr></thead>
+      <tbody>`)
+	for _, f := range st.AdvisorFindings {
+		b.WriteString(fmt.Sprintf(`<tr><td><span class="sev-%s">%s</span></td><td><b>%s</b></td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+			html.EscapeString(f.Severity), html.EscapeString(f.Severity), html.EscapeString(f.Category),
+			html.EscapeString(f.Title), html.EscapeString(f.Detail), html.EscapeString(f.Suggestion)))
+	}
+	b.WriteString(`</tbody></table>`)
+
+	// 2. SRE / SLO Status
+	b.WriteString(`    <h2>2. Objetivos de Nivel de Servicio (SRE / SLO &amp; Error Budget)</h2>
+    <table>
+      <thead><tr><th>Dimensión SLO</th><th>Target</th><th>SLI Actual</th><th>Error Budget Restante</th><th>Burn Rate</th><th>Estado</th></tr></thead>
+      <tbody>`)
+	for _, s := range slos {
+		b.WriteString(fmt.Sprintf(`<tr><td><b>%s</b><br><small>%s</small></td><td>%.2f%%</td><td><b>%.2f%%</b></td><td>%.1f%%</td><td>%.2fx</td><td><span class="sev-%s">%s</span></td></tr>`,
+			html.EscapeString(s.Name), html.EscapeString(s.Description), s.TargetPct, s.CurrentSLIPct, s.ErrorBudgetRemPct, s.BurnRate, html.EscapeString(s.Status), html.EscapeString(s.Status)))
+	}
+	b.WriteString(`</tbody></table>`)
+
+	// 3. SQL Plan Instability
+	b.WriteString(`    <h2>3. Detector de Regresión de Planes SQL (Plan Flips en gv$sql)</h2>
+    <table>
+      <thead><tr><th>SQL_ID</th><th>Esquema</th><th>Planes</th><th>PHV Actual</th><th>Mejor PHV</th><th>Latencia Actual</th><th>Mejor Latencia</th><th>Estado</th><th>SQL Text</th></tr></thead>
+      <tbody>`)
+	if len(st.PlanFlips) == 0 {
+		b.WriteString(`<tr><td colspan="9">Sin regresiones de planes SQL detectadas en la caché de cursores.</td></tr>`)
+	}
+	for _, pf := range st.PlanFlips {
+		b.WriteString(fmt.Sprintf(`<tr><td><b>%s</b></td><td>%s</td><td>%d</td><td>%d</td><td><b>%d</b></td><td>%.1f ms</td><td>%.1f ms</td><td><span class="sev-%s">%s</span></td><td><code>%s</code></td></tr>`,
+			html.EscapeString(pf.SQLID), html.EscapeString(pf.Schema), pf.PlanCount,
+			pf.CurrentPHV, pf.BestPHV, pf.AvgElapsedMs, pf.BestElapsedMs,
+			html.EscapeString(pf.Status), html.EscapeString(pf.Status), html.EscapeString(pf.SQLText)))
+	}
+	b.WriteString(`</tbody></table>`)
+
+	// 4. Scheduler Jobs & RMAN Channels
+	b.WriteString(`    <h2>4. Jobs de Negocio (DBMS_SCHEDULER) &amp; Canales RMAN en Vivo</h2>
+    <table>
+      <thead><tr><th>Propietario.Job</th><th>Tipo</th><th>Estado</th><th>Habilitado</th><th>Fallos (24h / Total)</th><th>Último Inicio (Duración)</th><th>Próxima Ejecución</th><th>Detalle / Último Error</th></tr></thead>
+      <tbody>`)
+	for _, jb := range st.SchedulerJobs {
+		sev := "OK"
+		if jb.Failed24h > 0 || strings.Contains(strings.ToUpper(jb.State), "FAIL") {
+			sev = "CRITICAL"
+		}
+		b.WriteString(fmt.Sprintf(`<tr><td><b>%s.%s</b></td><td>%s</td><td><span class="sev-%s">%s</span></td><td>%s</td><td>%d / %d</td><td>%s (%ds)</td><td>%s</td><td>%s</td></tr>`,
+			html.EscapeString(jb.Owner), html.EscapeString(jb.JobName), html.EscapeString(jb.JobType),
+			sev, html.EscapeString(jb.State), html.EscapeString(jb.Enabled), jb.Failed24h, jb.FailureCount,
+			html.EscapeString(jb.LastStart), jb.DurationSec, html.EscapeString(jb.NextRun), html.EscapeString(jb.Detail)))
+	}
+	b.WriteString(`</tbody></table>`)
+
+	// 5. RAC Cache Fusion & Datafile I/O Latency
+	b.WriteString(`    <h2>5. Latencia RAC Cache Fusion &amp; Latencia I/O por Datafile (v$filestat)</h2>
+    <table>
+      <thead><tr><th>Instancia RAC</th><th>Interconnect Privado</th><th>GC CR Block Receive (ms)</th><th>GC Current Block Receive (ms)</th><th>Bloques CR Recibidos</th><th>Bloques Current Recibidos</th><th>Estado</th></tr></thead>
+      <tbody>`)
+	for _, cf := range st.CacheFusion {
+		b.WriteString(fmt.Sprintf(`<tr><td><b>%s (Inst #%d)</b></td><td>%s</td><td><b>%.2f ms</b></td><td><b>%.2f ms</b></td><td>%d</td><td>%d</td><td><span class="sev-%s">%s</span></td></tr>`,
+			html.EscapeString(cf.InstanceName), cf.InstID, html.EscapeString(cf.InterconnectIP), cf.CRBlockLatencyMs, cf.CurBlockLatencyMs, cf.CRBlocksReceived, cf.CurBlocksReceived, html.EscapeString(cf.Status), html.EscapeString(cf.Status)))
+	}
+	b.WriteString(`</tbody></table>
+    <table>
+      <thead><tr><th>File#</th><th>Tablespace</th><th>Datafile</th><th>Avg Read (ms)</th><th>Avg Write (ms)</th><th>Volumen Leído / Escrito (MB)</th><th>Estado I/O</th></tr></thead>
+      <tbody>`)
+	for _, dio := range st.DatafileIO {
+		b.WriteString(fmt.Sprintf(`<tr><td>#%d</td><td><b>%s</b></td><td><code>%s</code></td><td><b>%.2f ms</b></td><td><b>%.2f ms</b></td><td>%.1f / %.1f MB</td><td><span class="sev-%s">%s</span></td></tr>`,
+			dio.FileID, html.EscapeString(dio.Tablespace), html.EscapeString(dio.FileName), dio.AvgReadMs, dio.AvgWriteMs, dio.ReadMB, dio.WriteMB, html.EscapeString(dio.Status), html.EscapeString(dio.Status)))
+	}
+	b.WriteString(`</tbody></table>`)
+
+	// 6. Tablespaces, Memory Advisors & SAN Multipath
+	b.WriteString(`    <h2>6. Asesores de Memoria (SGA/PGA), Tablespaces &amp; SAN Multipath</h2>
+    <table>
+      <thead><tr><th>Asesor</th><th>Tamaño Simulado (MB)</th><th>Factor</th><th>DB Time Ratio / Hit%% Est.</th><th>Lecturas Físicas Est.</th><th>Evaluación</th></tr></thead>
+      <tbody>`)
+	for _, ma := range st.MemoryAdvisor {
+		b.WriteString(fmt.Sprintf(`<tr><td><b>%s</b></td><td>%d MB</td><td>%.2fx</td><td>%.2f / %.1f%%</td><td>%d</td><td>%s</td></tr>`,
+			html.EscapeString(ma.AdvisorType), ma.SizeMB, ma.SizeFactor, ma.EstDBTimeFactor, ma.EstHitPct, ma.EstPhysReads, html.EscapeString(ma.Recommendation)))
+	}
+	b.WriteString(`</tbody></table>
+  </div>
+</body>
+</html>`)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(b.String()))
+}
+

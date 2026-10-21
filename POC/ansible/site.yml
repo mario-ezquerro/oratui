@@ -1,6 +1,6 @@
 ---
 # ==============================================================================
-# Playbook Maestro de Observabilidad y Operación Activa con ora-tui (v1.8.0)
+# Playbook Maestro de Observabilidad y Operación Activa con ora-tui (v1.9.0)
 #
 # Uso completo (instala daemon en servidores Oracle + actualiza Flutter Web/Prometheus/Grafana):
 #   ansible-playbook -i inventory.ini site.yml
@@ -24,8 +24,8 @@
   vars:
     node_otel_port: "{{ otel_port | default(default_otel_port | default(9161)) }}"
     node_interval: "{{ oratui_scrape_interval | default('10s') }}"
-    local_rpm_path: "{{ playbook_dir }}/../../dist/ora-tui-1.8.0-1.x86_64.rpm"
-    local_deb_path: "{{ playbook_dir }}/../../dist/ora-tui_1.8.0-1_amd64.deb"
+    local_rpm_path: "{{ playbook_dir }}/../../dist/ora-tui-1.9.0-1.x86_64.rpm"
+    local_deb_path: "{{ playbook_dir }}/../../dist/ora-tui_1.9.0-1_amd64.deb"
 
   tasks:
     - name: Comprobar si existe el paquete RPM compilado localmente en el nodo de control

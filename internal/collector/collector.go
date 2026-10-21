@@ -93,5 +93,7 @@ func CollectLiveEnvironment(ctx context.Context, runner *executor.Runner) (*mode
 		StoragePaths:    storagePaths,
 	}
 
+	CollectAdvancedOracleMetrics(ctx, runner, env, activeSID, state)
+
 	return state, env, nil
 }

@@ -100,6 +100,7 @@ func (e *Exporter) Start() (*http.Server, error) {
 	mux.HandleFunc("/api/v1/sre/config", e.handleSREConfigUpdate)
 	mux.HandleFunc("/api/v1/sre/notify", e.handleSRENotifyNow)
 	mux.HandleFunc("/api/v1/action", e.handleExecuteAction)
+	mux.HandleFunc("/api/v1/report", e.handleExecutiveReport)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if enableCORS(w, r) {
 			return
@@ -155,9 +156,10 @@ func (e *Exporter) handleIndexPage(w http.ResponseWriter, r *http.Request) {
     <p><span class="badge">%s</span> <b>Host:</b> %s │ <b>Cluster:</b> %s │ <b>Oracle Ver:</b> %s │ <b>Last Scrape:</b> %s</p>
     <hr style="border-color:#5fffff">
     <ul>
-      <li><a href="/metrics">/metrics</a> — Formato <b>Prometheus / OpenMetrics</b> (52 métricas)</li>
+      <li><a href="/metrics">/metrics</a> — Formato <b>Prometheus / OpenMetrics</b> (70+ métricas incluyendo SQL Plan Flips, RMAN Channels, Jobs, Cache Fusion e I/O)</li>
       <li><a href="/otel/v1/metrics">/otel/v1/metrics</a> — Formato <b>OpenTelemetry OTLP JSON (resourceMetrics)</b></li>
-      <li><a href="/api/v1/state">/api/v1/state</a> — Snapshot completo del estado + historial temporal + SRE/SLO en <b>JSON</b> (para Flutter Web)</li>
+      <li><a href="/api/v1/state">/api/v1/state</a> — Snapshot completo del estado + Advisor + historial temporal + SRE/SLO en <b>JSON</b> (para Flutter Web)</li>
+      <li><a href="/api/v1/report">/api/v1/report</a> — <b>Informe Ejecutivo HTML/PDF</b> (KPIs, Hallazgos Advisor, SQL Plan Flips, RMAN, Jobs, Cache Fusion, SAN)</li>
       <li><a href="/api/v1/sre">/api/v1/sre</a> — Estado de <b>Objetivos SLO, Error Budget, Alertas Críticas y Canales Telegram/Email</b></li>
       <li><b>POST /api/v1/action</b> — Ejecución remota autenticada de acciones DBA y Linux/SAN con validación anti-inyección</li>
       <li><a href="/healthz">/healthz</a> — Healthcheck HTTP 200 OK</li>
@@ -506,6 +508,85 @@ func RenderPrometheusMetrics(st model.EnvironmentState, updated time.Time, versi
 		b.WriteString(fmt.Sprintf("oratui_storage_path_healthy{host=%q,cluster=%q,name=%q,type=%q,size=%q,wwid_model=%q,paths_summary=%q,status=%q} %.0f\n",
 			host, cluster, sp.Name, sp.Type, sp.Size, sp.WWIDOrModel, sp.PathsSummary, sp.Status, healthy))
 	}
+
+	// 15. SQL Plan Instability / Plan Flips (gv$sql)
+	writeHelpType("oratui_sql_plan_instability_elapsed_ms", "Worst average elapsed time in ms for SQL_ID with multiple plans in cursor cache", "gauge")
+	writeHelpType("oratui_sql_plan_instability_best_elapsed_ms", "Best average elapsed time in ms for SQL_ID in cursor cache", "gauge")
+	writeHelpType("oratui_sql_plan_instability_plans_count", "Number of distinct plan_hash_values active for SQL_ID in cursor cache", "gauge")
+	for _, pf := range st.PlanFlips {
+		labels := fmt.Sprintf("host=%q,cluster=%q,sql_id=%q,current_phv=%q,best_phv=%q,schema=%q,status=%q",
+			host, cluster, pf.SQLID, strconv.FormatInt(pf.CurrentPHV, 10), strconv.FormatInt(pf.BestPHV, 10), pf.Schema, pf.Status)
+		b.WriteString(fmt.Sprintf("oratui_sql_plan_instability_elapsed_ms{%s} %.2f\n", labels, pf.AvgElapsedMs))
+		b.WriteString(fmt.Sprintf("oratui_sql_plan_instability_best_elapsed_ms{%s} %.2f\n", labels, pf.BestElapsedMs))
+		b.WriteString(fmt.Sprintf("oratui_sql_plan_instability_plans_count{%s} %d\n", labels, pf.PlanCount))
+	}
+
+	// 16. Live RMAN Channel Progress (gv$session_longops / gv$backup_async_io)
+	writeHelpType("oratui_rman_channel_progress_percent", "Active RMAN channel completion percentage", "gauge")
+	writeHelpType("oratui_rman_channel_throughput_mbps", "Active RMAN channel throughput in MB/s", "gauge")
+	writeHelpType("oratui_rman_channel_eta_seconds", "Active RMAN channel estimated time remaining in seconds", "gauge")
+	for _, ch := range st.RMANChannels {
+		labels := fmt.Sprintf("host=%q,cluster=%q,sid=%q,channel=%q,operation=%q,file=%q",
+			host, cluster, strconv.Itoa(ch.SID), ch.Channel, ch.Operation, ch.CurrentFile)
+		b.WriteString(fmt.Sprintf("oratui_rman_channel_progress_percent{%s} %.2f\n", labels, ch.PctComplete))
+		b.WriteString(fmt.Sprintf("oratui_rman_channel_throughput_mbps{%s} %.2f\n", labels, ch.MBPerSec))
+		b.WriteString(fmt.Sprintf("oratui_rman_channel_eta_seconds{%s} %d\n", labels, ch.ETASec))
+	}
+
+	// 17. Business / Application Scheduler Jobs (dba_scheduler_jobs)
+	writeHelpType("oratui_scheduler_job_failed_runs_24h", "Failed executions in the last 24h for non-Oracle business job", "gauge")
+	writeHelpType("oratui_scheduler_job_failures_total", "Cumulative failure count for non-Oracle business job", "gauge")
+	for _, jb := range st.SchedulerJobs {
+		labels := fmt.Sprintf("host=%q,cluster=%q,owner=%q,job_name=%q,state=%q,enabled=%q,job_type=%q",
+			host, cluster, jb.Owner, jb.JobName, jb.State, jb.Enabled, jb.JobType)
+		b.WriteString(fmt.Sprintf("oratui_scheduler_job_failed_runs_24h{%s} %d\n", labels, jb.Failed24h))
+		b.WriteString(fmt.Sprintf("oratui_scheduler_job_failures_total{%s} %d\n", labels, jb.FailureCount))
+	}
+
+	// 18. RAC Cache Fusion Global Cache Latency & Interconnect
+	writeHelpType("oratui_rac_gc_cr_block_receive_ms", "RAC Global Cache consistent read (cr) block receive average latency in ms", "gauge")
+	writeHelpType("oratui_rac_gc_current_block_receive_ms", "RAC Global Cache current block receive average latency in ms", "gauge")
+	writeHelpType("oratui_rac_gc_cr_blocks_received_total", "RAC Global Cache consistent read (cr) blocks received", "gauge")
+	for _, cf := range st.CacheFusion {
+		labels := fmt.Sprintf("host=%q,cluster=%q,inst_id=%q,instance=%q,interconnect=%q,status=%q",
+			host, cluster, strconv.Itoa(cf.InstID), cf.InstanceName, cf.InterconnectIP, cf.Status)
+		b.WriteString(fmt.Sprintf("oratui_rac_gc_cr_block_receive_ms{%s} %.3f\n", labels, cf.CRBlockLatencyMs))
+		b.WriteString(fmt.Sprintf("oratui_rac_gc_current_block_receive_ms{%s} %.3f\n", labels, cf.CurBlockLatencyMs))
+		b.WriteString(fmt.Sprintf("oratui_rac_gc_cr_blocks_received_total{%s} %d\n", labels, cf.CRBlocksReceived))
+	}
+
+	// 19. Per-Datafile I/O Latency (v$filestat)
+	writeHelpType("oratui_datafile_io_avg_read_ms", "Datafile average physical read latency in milliseconds", "gauge")
+	writeHelpType("oratui_datafile_io_avg_write_ms", "Datafile average physical write latency in milliseconds", "gauge")
+	writeHelpType("oratui_datafile_io_read_mb", "Datafile total physical read volume in MB", "gauge")
+	for _, dio := range st.DatafileIO {
+		labels := fmt.Sprintf("host=%q,cluster=%q,file_id=%q,tablespace=%q,file_name=%q,status=%q",
+			host, cluster, strconv.Itoa(dio.FileID), dio.Tablespace, dio.FileName, dio.Status)
+		b.WriteString(fmt.Sprintf("oratui_datafile_io_avg_read_ms{%s} %.2f\n", labels, dio.AvgReadMs))
+		b.WriteString(fmt.Sprintf("oratui_datafile_io_avg_write_ms{%s} %.2f\n", labels, dio.AvgWriteMs))
+		b.WriteString(fmt.Sprintf("oratui_datafile_io_read_mb{%s} %.2f\n", labels, dio.ReadMB))
+	}
+
+	// 20. Redo Log Switch Rate, Undo ORA-01555 & Cache Efficiency
+	writeHelpType("oratui_redo_switches_last_hour", "Number of redo log switches in the last hour", "gauge")
+	b.WriteString(fmt.Sprintf("oratui_redo_switches_last_hour{host=%q,cluster=%q} %d\n", host, cluster, st.RedoUndo.RedoSwitchesLastHour))
+	writeHelpType("oratui_undo_ora01555_count", "ORA-01555 Snapshot Too Old count in v$undostat (24h)", "gauge")
+	b.WriteString(fmt.Sprintf("oratui_undo_ora01555_count{host=%q,cluster=%q} %d\n", host, cluster, st.RedoUndo.ORA01555Count))
+	writeHelpType("oratui_buffer_cache_hit_percent", "Oracle Buffer Cache hit ratio percentage", "gauge")
+	b.WriteString(fmt.Sprintf("oratui_buffer_cache_hit_percent{host=%q,cluster=%q} %.2f\n", host, cluster, st.RedoUndo.BufferCacheHitPct))
+	writeHelpType("oratui_pga_cache_hit_percent", "Oracle PGA cache hit percentage", "gauge")
+	b.WriteString(fmt.Sprintf("oratui_pga_cache_hit_percent{host=%q,cluster=%q} %.2f\n", host, cluster, st.RedoUndo.PGACacheHitPct))
+
+	// 21. Wait Chains, Parallel Query DOP Downgrade & Advisor Findings
+	writeHelpType("oratui_wait_chains_active_total", "Number of active multi-hop lock wait chains in v$wait_chains", "gauge")
+	b.WriteString(fmt.Sprintf("oratui_wait_chains_active_total{host=%q,cluster=%q} %d\n", host, cluster, len(st.WaitChains)))
+	writeHelpType("oratui_parallel_query_downgraded", "Parallel Query DOP downgrade status (1=DOWNGRADED, 0=OPTIMAL)", "gauge")
+	for _, pq := range st.ParallelQueries {
+		b.WriteString(fmt.Sprintf("oratui_parallel_query_downgraded{host=%q,cluster=%q,qc_sid=%q,username=%q,sql_id=%q,req_dop=%q,actual_dop=%q} %.0f\n",
+			host, cluster, strconv.Itoa(pq.QCSID), pq.Username, pq.SQLID, strconv.Itoa(pq.ReqDOP), strconv.Itoa(pq.ActualDOP), boolToFloat(pq.IsDowngraded)))
+	}
+	writeHelpType("oratui_advisor_findings_total", "Number of active automatic advisor findings", "gauge")
+	b.WriteString(fmt.Sprintf("oratui_advisor_findings_total{host=%q,cluster=%q} %d\n", host, cluster, len(st.AdvisorFindings)))
 
 	return b.String()
 }

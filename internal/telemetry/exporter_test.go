@@ -39,6 +39,16 @@ func TestRenderPrometheusAndOTelMetrics(t *testing.T) {
 		`oratui_filesystem_used_percent{`,
 		`oratui_filesystem_inodes_used_percent{`,
 		`oratui_storage_path_healthy{`,
+		`oratui_sql_plan_instability_elapsed_ms{`,
+		`oratui_rman_channel_progress_percent{`,
+		`oratui_scheduler_job_failed_runs_24h{`,
+		`oratui_rac_gc_cr_block_receive_ms{`,
+		`oratui_datafile_io_avg_read_ms{`,
+		`oratui_redo_switches_last_hour{`,
+		`oratui_buffer_cache_hit_percent{`,
+		`oratui_wait_chains_active_total{`,
+		`oratui_parallel_query_downgraded{`,
+		`oratui_advisor_findings_total{`,
 	}
 
 	for _, req := range requiredMetrics {
@@ -114,6 +124,38 @@ func TestSRESLOAndRemoteActions(t *testing.T) {
 	exp.handleExecuteAction(basicRec, basicReq)
 	if basicRec.Code != http.StatusOK {
 		t.Fatalf("expected HTTP 200 with valid Basic Auth (admin:admin), got %d", basicRec.Code)
+	}
+
+	// 5. Test new ora-brabo actions (pin_sql_plan, run_scheduler_job, tune_memory_advisor)
+	for _, tc := range []struct {
+		payload string
+		expect  string
+	}{
+		{`{"action":"pin_sql_plan","target":"8f4k2m91x7p0q:1049281744"}`, "SPM Plans Loaded"},
+		{`{"action":"run_scheduler_job","target":"CRM_DATA.JOB_SYNC_CREDIT_SCORES"}`, "Coordinator CJQ0"},
+		{`{"action":"tune_memory_advisor","target":"SGA:40960"}`, "SGA_SIZE_FACTOR"},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/action", strings.NewReader(tc.payload))
+		req.SetBasicAuth("admin", "admin")
+		rec := httptest.NewRecorder()
+		exp.handleExecuteAction(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), tc.expect) {
+			t.Fatalf("expected HTTP 200 containing %q for %s, got %d: %s", tc.expect, tc.payload, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 6. Test Executive HTML/PDF Report (/api/v1/report)
+	repReq := httptest.NewRequest(http.MethodGet, "/api/v1/report", nil)
+	repRec := httptest.NewRecorder()
+	exp.handleExecutiveReport(repRec, repReq)
+	if repRec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 from /api/v1/report, got %d", repRec.Code)
+	}
+	repHTML := repRec.Body.String()
+	for _, snippet := range []string{"INFORME EJECUTIVO DE SALUD ORACLE DBA", "8f4k2m91x7p0q", "JOB_SYNC_CREDIT_SCORES", "PRODCDB1"} {
+		if !strings.Contains(repHTML, snippet) {
+			t.Fatalf("expected /api/v1/report HTML to contain %q", snippet)
+		}
 	}
 }
 

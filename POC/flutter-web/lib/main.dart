@@ -189,7 +189,7 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
   void initState() {
     super.initState();
     _selectedServer = _servers.first;
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _loadAuthAndServers();
     _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_isAuthenticated) _fetchTelemetry();
@@ -769,7 +769,7 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'ORA-TUI v1.8 :: CONTROL & SRE LOGIN',
+                          'ORA-TUI v1.9 :: CONTROL & SRE LOGIN',
                           style: TextStyle(
                             color: Color(0xFFFFFF5F),
                             fontWeight: FontWeight.bold,
@@ -882,7 +882,7 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
                 border: Border.all(color: const Color(0xFFFFFF5F), width: 1.5),
               ),
               child: const Text(
-                'ORA-TUI v1.8 WEB CONTROL & SRE',
+                'ORA-TUI v1.9 WEB CONTROL & SRE',
                 style: TextStyle(
                   color: Color(0xFFFFFF5F),
                   fontWeight: FontWeight.bold,
@@ -954,6 +954,21 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
                 label: Text('${alerts.length} ALARMAS DELICADAS'),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00AFAF),
+                foregroundColor: Colors.black,
+              ),
+              onPressed: _showExecutiveReportModal,
+              icon: const Icon(Icons.assessment_outlined, size: 17),
+              label: const Text(
+                'INFORME EJECUTIVO',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Refrescar telemetría ahora',
             onPressed: _fetchTelemetry,
@@ -997,6 +1012,10 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
             const Tab(icon: Icon(Icons.lock_clock), text: '4. SESIONES, BLOQUEOS & OBJETOS'),
             const Tab(icon: Icon(Icons.shield), text: '5. RMAN, DATA GUARD & ALERT LOG'),
             const Tab(icon: Icon(Icons.memory), text: '6. LINUX SO, INODOS & SAN MULTIPATH'),
+            const Tab(
+              icon: Icon(Icons.psychology),
+              text: '7. ADVISOR, PLAN FLIPS, JOBS, CACHE FUSION & I/O',
+            ),
           ],
         ),
       ),
@@ -1036,6 +1055,7 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
                       _buildTab4SessionsLocksAndObjects(),
                       _buildTab5RmanDataGuardAndAlertLog(),
                       _buildTab6LinuxKernelAndSanMultipath(),
+                      _buildTab7AdvancedOraBraboDiagnostics(),
                     ],
                   ),
                 ),
@@ -1962,6 +1982,655 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
   }
 
   // ===========================================================================
+  // TAB 7: ADVISOR AUTOMÁTICO, SQL PLAN FLIPS, JOBS, CACHE FUSION, I/O & MEMORIA
+  // (INSPIRADO EN LAS 8 MEJORAS DE ORA-BRABO)
+  // ===========================================================================
+  Widget _buildTab7AdvancedOraBraboDiagnostics() {
+    final findings = (_stateData['AdvisorFindings'] as List?) ?? [];
+    final planFlips = (_stateData['PlanFlips'] as List?) ?? [];
+    final jobs = (_stateData['SchedulerJobs'] as List?) ?? [];
+    final cacheFusion = (_stateData['CacheFusion'] as List?) ?? [];
+    final datafileIO = (_stateData['DatafileIO'] as List?) ?? [];
+    final memAdvisor = (_stateData['MemoryAdvisor'] as List?) ?? [];
+    final waitChains = (_stateData['WaitChains'] as List?) ?? [];
+    final pqList = (_stateData['ParallelQueries'] as List?) ?? [];
+    final redoUndo = (_stateData['RedoUndo'] as Map<String, dynamic>?) ?? {};
+
+    final logSw1h = _toInt(redoUndo['RedoSwitchesLastHour']);
+    final ora1555 = _toInt(redoUndo['ORA01555Count']);
+    final bufHit = _toDouble(redoUndo['BufferCacheHitPct'], 98.7);
+    final pgaHit = _toDouble(redoUndo['PGACacheHitPct'], 96.4);
+    final redoRate = _toDouble(redoUndo['RedoRateMBPerSec'], 18.4);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _kpiCard(
+                'HALLAZGOS ADVISOR',
+                '${findings.length}',
+                findings.isNotEmpty ? const Color(0xFFFFFF5F) : const Color(0xFF5FFF5F),
+                Icons.psychology,
+              ),
+              _kpiCard(
+                'SQL PLAN FLIPS',
+                '${planFlips.length}',
+                planFlips.isNotEmpty ? const Color(0xFFFF5F5F) : const Color(0xFF5FFF5F),
+                Icons.alt_route,
+              ),
+              _kpiCard(
+                'BUFFER / PGA HIT',
+                '${bufHit.toStringAsFixed(1)}% / ${pgaHit.toStringAsFixed(1)}%',
+                const Color(0xFF5FFFFF),
+                Icons.memory,
+              ),
+              _kpiCard(
+                'REDO SWITCHES / H',
+                '$logSw1h/h (${redoRate.toStringAsFixed(1)} MB/s)',
+                logSw1h >= 12 ? const Color(0xFFFFAF00) : const Color(0xFF5FFF5F),
+                Icons.loop,
+              ),
+              _kpiCard(
+                'UNDO ORA-01555',
+                '$ora1555',
+                ora1555 > 0 ? const Color(0xFFFF5F5F) : const Color(0xFF5FFF5F),
+                Icons.history_toggle_off,
+              ),
+              _kpiCard(
+                'WAIT CHAINS / PX DOP',
+                '${waitChains.length} / ${pqList.length}',
+                waitChains.isNotEmpty ? const Color(0xFFFFAF00) : const Color(0xFF5FFFFF),
+                Icons.account_tree_outlined,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _nortonPanel(
+            title: '🧠 MOTOR CONTINUO DE HALLAZGOS & RECOMENDACIONES DBA/SRE (ADVISOR ENGINE)',
+            trailing: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFFFF5F),
+                foregroundColor: Colors.black,
+              ),
+              onPressed: _showExecutiveReportModal,
+              icon: const Icon(Icons.print, size: 15),
+              label: const Text(
+                'VER / EXPORTAR INFORME EJECUTIVO HTML/PDF',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+            ),
+            child: Column(
+              children: [
+                for (final f in findings)
+                  Builder(
+                    builder: (context) {
+                      final sev = (f['Severity'] ?? 'INFO').toString().toUpperCase();
+                      final isCrit = sev == 'CRITICAL';
+                      final isOk = sev == 'INFO' || sev == 'OK';
+                      final actId = (f['ActionID'] ?? '').toString();
+                      final actTarget = (f['ActionTarget'] ?? '').toString();
+                      return Container(
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isCrit
+                              ? const Color(0xFF440011)
+                              : (isOk ? Colors.black26 : const Color(0xFF332200)),
+                          border: Border.all(
+                            color: isCrit
+                                ? const Color(0xFFFF5F5F)
+                                : (isOk ? const Color(0xFF5FFF5F) : const Color(0xFFFFFF5F)),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            _statusBadge(sev, isOk),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '[${f['Category']}] ${f['Title']}',
+                                    style: const TextStyle(
+                                      color: Color(0xFFFFFF5F),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${f['Detail']}',
+                                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                                  ),
+                                  Text(
+                                    '💡 Sugerencia: ${f['Suggestion']} (Impacto: ${f['Impact'] ?? 'MEDIO'})',
+                                    style: const TextStyle(color: Color(0xFF5FFFFF), fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (actId.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF00AFAF),
+                                  foregroundColor: Colors.black,
+                                ),
+                                onPressed: () => _executeRemoteAction(
+                                  action: actId,
+                                  target: actTarget,
+                                  label: '${f['Title']} ($actTarget)',
+                                ),
+                                icon: const Icon(Icons.build_circle, size: 15),
+                                label: const Text(
+                                  'REMEDIAR 1-CLIC',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _nortonPanel(
+            title:
+                '🔀 DETECTOR DE REGRESIÓN DE PLANES SQL (PLAN FLIPS EN gv\$sql — SIN LICENCIA AWR)',
+            child: Column(
+              children: [
+                if (planFlips.isEmpty)
+                  const Text('Sin regresiones de planes SQL activas en gv\$sql.'),
+                for (final pf in planFlips)
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.all(10),
+                    color: Colors.black26,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  _statusBadge(
+                                    (pf['Status'] ?? 'REGRESSION').toString(),
+                                    (pf['Status'] ?? '').toString() == 'STABLE',
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'SQL_ID: ${pf['SQLID']}  |  Esquema: ${pf['Schema']}  |  Planes en caché: ${pf['PlanCount']}  |  Ejecuciones: ${pf['Executions']}',
+                                    style: const TextStyle(
+                                      color: Color(0xFFFFFF5F),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'PHV Actual: ${pf['CurrentPHV']} (${_toDouble(pf['AvgElapsedMs']).toStringAsFixed(1)} ms/exec)  ➔  Mejor PHV: ${pf['BestPHV']} (${_toDouble(pf['BestElapsedMs']).toStringAsFixed(1)} ms/exec)  |  Adaptativo: ${pf['Adaptive']}',
+                                style: const TextStyle(color: Color(0xFF5FFFFF), fontSize: 12),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'SQL: ${pf['SQLText']}',
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF5FFF5F),
+                            foregroundColor: Colors.black,
+                          ),
+                          onPressed: () => _executeRemoteAction(
+                            action: 'pin_sql_plan',
+                            target: '${pf['SQLID']}:${pf['BestPHV']}',
+                            label:
+                                'Fijar Plan Óptimo PHV ${pf['BestPHV']} en SQL Plan Baseline para ${pf['SQLID']}',
+                          ),
+                          icon: const Icon(Icons.push_pin, size: 15),
+                          label: Text(
+                            'FIJAR PLAN ${pf['BestPHV']} (SPM)',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _nortonPanel(
+                  title: '📅 MONITOR DE JOBS DE NEGOCIO (DBMS_SCHEDULER / DBMS_JOB)',
+                  child: Column(
+                    children: [
+                      for (final jb in jobs)
+                        Builder(
+                          builder: (context) {
+                            final stStr = (jb['State'] ?? 'SCHEDULED').toString();
+                            final failed24 = _toInt(jb['Failed24h']);
+                            final ok = failed24 == 0 && !stStr.toUpperCase().contains('FAIL');
+                            final jobSpec = '${jb['Owner']}.${jb['JobName']}';
+                            return Container(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              padding: const EdgeInsets.all(8),
+                              color: ok ? Colors.black26 : const Color(0xFF440011),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '$jobSpec (${jb['JobType']})',
+                                          style: const TextStyle(
+                                            color: Color(0xFFFFFF5F),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                      _statusBadge('$stStr (24h Fails: $failed24)', ok),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'Último: ${jb['LastStart']} (${jb['DurationSec']}s) | Próx: ${jb['NextRun']} | Runs: ${jb['RunCount']}',
+                                    style: const TextStyle(fontSize: 11, color: Color(0xFF5FFFFF)),
+                                  ),
+                                  Text(
+                                    'Detalle: ${jb['Detail']}',
+                                    style: const TextStyle(fontSize: 11, color: Colors.white70),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF00AFAF),
+                                          foregroundColor: Colors.black,
+                                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                                        ),
+                                        onPressed: () => _executeRemoteAction(
+                                          action: 'run_scheduler_job',
+                                          target: jobSpec,
+                                          label: 'Ejecutar Job $jobSpec Ahora (DBMS_SCHEDULER)',
+                                        ),
+                                        icon: const Icon(Icons.play_arrow, size: 14),
+                                        label: const Text(
+                                          'EJECUTAR JOB',
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      OutlinedButton(
+                                        onPressed: () => _executeRemoteAction(
+                                          action: 'enable_scheduler_job',
+                                          target: jobSpec,
+                                          label: 'Habilitar Job $jobSpec',
+                                        ),
+                                        child: const Text(
+                                          'ENABLE',
+                                          style: TextStyle(fontSize: 11, color: Color(0xFF5FFF5F)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  children: [
+                    _nortonPanel(
+                      title: '⚡ LATENCIA GLOBAL CACHE RAC CACHE FUSION (gv\$sysstat)',
+                      child: Column(
+                        children: [
+                          for (final cf in cacheFusion)
+                            Container(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              padding: const EdgeInsets.all(8),
+                              color: Colors.black26,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${cf['InstanceName']} (Inst #${cf['InstID']}) — Interconnect: ${cf['InterconnectIP']}',
+                                          style: const TextStyle(
+                                            color: Color(0xFFFFFF5F),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          'GC CR Block Receive: ${_toDouble(cf['CRBlockLatencyMs']).toStringAsFixed(2)} ms (${cf['CRBlocksReceived']} blks)  |  GC Current Block: ${_toDouble(cf['CurBlockLatencyMs']).toStringAsFixed(2)} ms',
+                                          style: const TextStyle(
+                                            color: Color(0xFF5FFFFF),
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  _statusBadge(
+                                    (cf['Status'] ?? 'OK').toString(),
+                                    _isHealthyStatus(cf['Status']),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _nortonPanel(
+                      title: '⛓️ WAIT CHAINS MULTI-SALTO & PARALLEL QUERY DOP DOWNGRADE',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final wc in waitChains)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Text(
+                                '🔒 Cadena #${wc['ChainID']}: ${wc['ChainSummary']} | Objeto: ${wc['LockedObject']} (${wc['WaitSec']}s)',
+                                style: const TextStyle(color: Color(0xFFFFAF00), fontSize: 12),
+                              ),
+                            ),
+                          for (final pq in pqList)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Text(
+                                '⚙️ PX QC SID ${pq['QCSID']} (${pq['Username']} • SQL ${pq['SQLID']}): DOP Solicitado=${pq['ReqDOP']} ➔ DOP Real=${pq['ActualDOP']} [${pq['Status']}]',
+                                style: const TextStyle(color: Color(0xFF5FFFFF), fontSize: 12),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _nortonPanel(
+                  title: '💿 LATENCIA I/O POR DATAFILE (v\$filestat AvgReadMs / AvgWriteMs)',
+                  child: Column(
+                    children: [
+                      for (final dio in datafileIO)
+                        Container(
+                          margin: const EdgeInsets.symmetric(vertical: 3),
+                          padding: const EdgeInsets.all(8),
+                          color: (dio['Status'] ?? 'OK').toString() == 'OK'
+                              ? Colors.black26
+                              : const Color(0xFF442200),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '[#${dio['FileID']} • ${dio['Tablespace']}] ${dio['FileName']}',
+                                      style: const TextStyle(
+                                        color: Color(0xFFFFFF5F),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Read: ${_toDouble(dio['AvgReadMs']).toStringAsFixed(2)} ms (${dio['ReadMB']} MB)  |  Write: ${_toDouble(dio['AvgWriteMs']).toStringAsFixed(2)} ms (${dio['WriteMB']} MB)',
+                                      style: const TextStyle(
+                                        color: Color(0xFF5FFFFF),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              _statusBadge(
+                                (dio['Status'] ?? 'OK').toString(),
+                                (dio['Status'] ?? 'OK').toString() == 'OK',
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _nortonPanel(
+                  title: '📐 ASESORES DE MEMORIA SGA & PGA (v\$sga_target_advice / v\$pga_target_advice)',
+                  trailing: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00AFAF),
+                      foregroundColor: Colors.black,
+                    ),
+                    onPressed: () => _executeRemoteAction(
+                      action: 'tune_memory_advisor',
+                      target: 'SGA_PGA_ADVICE',
+                      label: 'Consultar Simulación Completa de Asesores SGA/PGA',
+                    ),
+                    icon: const Icon(Icons.memory, size: 14),
+                    label: const Text('SIMULAR SGA/PGA', style: TextStyle(fontSize: 11)),
+                  ),
+                  child: Column(
+                    children: [
+                      for (final ma in memAdvisor)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              _statusBadge('${ma['AdvisorType']} ${ma['SizeMB']} MB', true),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Factor ${ma['SizeFactor']}x  ➔  ${ma['Recommendation']}',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showExecutiveReportModal() {
+    final baseUrl = _selectedServer.url.replaceAll(RegExp(r'/$'), '');
+    final reportUrl = '$baseUrl/api/v1/report';
+    final findings = (_stateData['AdvisorFindings'] as List?) ?? [];
+    final planFlips = (_stateData['PlanFlips'] as List?) ?? [];
+    final jobs = (_stateData['SchedulerJobs'] as List?) ?? [];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF000050),
+        shape: RoundedRectangleBorder(
+          side: const BorderSide(color: Color(0xFF5FFFFF), width: 2.5),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 880, maxHeight: 620),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.assessment, color: Color(0xFFFFFF5F), size: 26),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'INFORME EJECUTIVO DE SALUD ORACLE DBA, SRE & SAN — ${_selectedServer.name}',
+                        style: const TextStyle(
+                          color: Color(0xFFFFFF5F),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close, color: Colors.white),
+                    ),
+                  ],
+                ),
+                const Divider(color: Color(0xFF5FFFFF)),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  color: Colors.black45,
+                  child: SelectableText(
+                    '📄 Endpoint HTML/PDF Imprimible del Agente: $reportUrl',
+                    style: const TextStyle(
+                      color: Color(0xFF5FFF5F),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '1. RESUMEN DE HALLAZGOS DEL MOTOR ADVISOR (ORA-BRABO ENGINE):',
+                          style: TextStyle(
+                            color: Color(0xFFFFFF5F),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        for (final f in findings)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Text(
+                              '• [${f['Severity']}] ${f['Category']}: ${f['Title']} — ${f['Suggestion']}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        const SizedBox(height: 14),
+                        const Text(
+                          '2. REGRESIONES DE PLANES SQL (PLAN FLIPS EN CACHÉ):',
+                          style: TextStyle(
+                            color: Color(0xFFFFFF5F),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        for (final pf in planFlips)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Text(
+                              '• SQL_ID ${pf['SQLID']} (${pf['Schema']}): PHV Actual ${pf['CurrentPHV']} (${pf['AvgElapsedMs']} ms) vs Óptimo ${pf['BestPHV']} (${pf['BestElapsedMs']} ms)',
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF5FFFFF)),
+                            ),
+                          ),
+                        const SizedBox(height: 14),
+                        const Text(
+                          '3. ESTADO DE JOBS DE NEGOCIO (DBMS_SCHEDULER):',
+                          style: TextStyle(
+                            color: Color(0xFFFFFF5F),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        for (final jb in jobs)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Text(
+                              '• ${jb['Owner']}.${jb['JobName']}: Estado=${jb['State']} | Fallos 24h=${jb['Failed24h']} | Último=${jb['LastStart']}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF5FFFFF),
+                        foregroundColor: Colors.black,
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _tabController.animateTo(6);
+                      },
+                      icon: const Icon(Icons.psychology),
+                      label: const Text(
+                        'IR A PESTAÑA 7 (ADVISOR & REMEDIACIÓN)',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ===========================================================================
   // TAB 4: SESIONES, BLOQUEOS TX/TM, OBJETOS INVÁLIDOS & ESTADÍSTICAS
   // ===========================================================================
   Widget _buildTab4SessionsLocksAndObjects() {
@@ -2145,6 +2814,7 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
   Widget _buildTab5RmanDataGuardAndAlertLog() {
     final backups =
         (_stateData['RMANBackups'] as List?) ?? (_stateData['Backups'] as List?) ?? [];
+    final rmanChannels = (_stateData['RMANChannels'] as List?) ?? [];
     final rps = (_stateData['RestorePoints'] as List?) ?? [];
     final dgList =
         (_stateData['StandbyDBs'] as List?) ?? (_stateData['DataGuard'] as List?) ?? [];
@@ -2198,6 +2868,52 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
               ),
             ],
           ),
+          if (rmanChannels.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _nortonPanel(
+              title:
+                  '⚡ PROGRESO DE CANALES RMAN EN VIVO (gv\$session_longops + gv\$backup_async_io)',
+              child: Column(
+                children: [
+                  for (final ch in rmanChannels)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '[SID ${ch['SID']} • ${ch['Channel']}] ${ch['Operation']} → ${ch['CurrentFile']}',
+                                  style: const TextStyle(
+                                    color: Color(0xFFFFFF5F),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                              _statusBadge(
+                                '${_toDouble(ch['MBPerSec']).toStringAsFixed(1)} MB/s • ETA ${_toInt(ch['ETASec'])}s',
+                                true,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          _lcdProgressBar(
+                            pct: _toDouble(ch['PctComplete']),
+                            invertColors: true,
+                            label:
+                                'Procesado: ${_toDouble(ch['SoFarMB']).toStringAsFixed(1)} MB / ${_toDouble(ch['TotalMB']).toStringAsFixed(1)} MB (${_toDouble(ch['PctComplete']).toStringAsFixed(1)}%)',
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3060,6 +3776,211 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
           'PathsSummary': '3/4 DEGRADED (1 DOWN)',
           'PathDetails': 'sdf(OK), sdg(OK), sdh(OK), sdi(DOWN)',
           'Status': 'WARNING',
+        },
+      ],
+      'PlanFlips': [
+        {
+          'SQLID': '8f4k2m91x7p0q',
+          'Schema': 'ERP_CORE',
+          'PlanCount': 3,
+          'Executions': 18420,
+          'CurrentPHV': 3948102911,
+          'BestPHV': 1049281744,
+          'AvgElapsedMs': 428.5,
+          'BestElapsedMs': 18.2,
+          'Adaptive': 'YES',
+          'Status': 'REGRESSION',
+          'SQLText':
+              'SELECT /*+ INDEX(o ORD_PK) */ o.order_id, o.customer_id, l.amount FROM erp_orders o JOIN erp_order_lines l ON o.order_id = l.order_id WHERE o.status = :1',
+        },
+        {
+          'SQLID': '7p2v90n1k4m2a',
+          'Schema': 'ERP_CORE',
+          'PlanCount': 2,
+          'Executions': 940,
+          'CurrentPHV': 2819401822,
+          'BestPHV': 9182736450,
+          'AvgElapsedMs': 1420.0,
+          'BestElapsedMs': 610.0,
+          'Adaptive': 'NO',
+          'Status': 'UNSTABLE',
+          'SQLText':
+              'SELECT region, TRUNC(order_date,\'MM\'), SUM(total_amount) FROM erp_orders GROUP BY CUBE(region, TRUNC(order_date,\'MM\'))',
+        },
+      ],
+      'RMANChannels': [
+        {
+          'InstID': 1,
+          'SID': 77,
+          'Serial': 5012,
+          'Channel': 'ORA_SBT_TAPE_1',
+          'Operation': 'RMAN: full datafile backup',
+          'SoFarMB': 22412.8,
+          'TotalMB': 32768.0,
+          'PctComplete': 68.4,
+          'MBPerSec': 312.5,
+          'ETASec': 33,
+          'CurrentFile': '+DATA/PRODCDB/ERP_PROD/erp_data01.dbf',
+          'Status': 'ACTIVE',
+        },
+      ],
+      'SchedulerJobs': [
+        {
+          'JobType': 'SCHEDULER',
+          'Owner': 'ERP_CORE',
+          'JobName': 'JOB_NIGHTLY_INVOICE_CLOSE',
+          'State': 'SUCCEEDED',
+          'Enabled': 'TRUE',
+          'LastStart': '2026-10-16 02:00',
+          'NextRun': '2026-10-17 02:00',
+          'RunCount': 412,
+          'FailureCount': 0,
+          'Failed24h': 0,
+          'DurationSec': 862,
+          'Detail': 'Cierre nocturno de facturación ERP',
+        },
+        {
+          'JobType': 'SCHEDULER',
+          'Owner': 'CRM_DATA',
+          'JobName': 'JOB_SYNC_CREDIT_SCORES',
+          'State': 'FAILED',
+          'Enabled': 'TRUE',
+          'LastStart': '2026-10-16 06:30',
+          'NextRun': '2026-10-16 10:30',
+          'RunCount': 1280,
+          'FailureCount': 3,
+          'Failed24h': 3,
+          'DurationSec': 105,
+          'Detail': 'ORA-01654: unable to extend index ERP_CORE.IDX_ORDERS_CUST_DT',
+        },
+      ],
+      'CacheFusion': [
+        {
+          'InstID': 1,
+          'InstanceName': 'PRODCDB1',
+          'InterconnectIP': '192.168.10.1 (bond1)',
+          'CRBlocksReceived': 4829100,
+          'CRBlockLatencyMs': 0.42,
+          'CurBlocksReceived': 1294800,
+          'CurBlockLatencyMs': 0.68,
+          'Status': 'OK',
+        },
+        {
+          'InstID': 2,
+          'InstanceName': 'PRODCDB2',
+          'InterconnectIP': '192.168.10.2 (bond1)',
+          'CRBlocksReceived': 4610200,
+          'CRBlockLatencyMs': 0.48,
+          'CurBlocksReceived': 1184200,
+          'CurBlockLatencyMs': 0.74,
+          'Status': 'OK',
+        },
+      ],
+      'DatafileIO': [
+        {
+          'FileID': 10,
+          'FileName': '+DATA/PRODCDB/ERP_PROD/erp_data01.dbf',
+          'Tablespace': 'ERP_DATA_TBS',
+          'AvgReadMs': 1.85,
+          'AvgWriteMs': 2.10,
+          'ReadMB': 37727.4,
+          'WriteMB': 7173.8,
+          'Status': 'OK',
+        },
+        {
+          'FileID': 18,
+          'FileName': '+DATA/PRODCDB/CRM_PROD/crm_data01.dbf',
+          'Tablespace': 'CRM_DATA_TBS',
+          'AvgReadMs': 12.40,
+          'AvgWriteMs': 6.80,
+          'ReadMB': 15065.6,
+          'WriteMB': 4788.3,
+          'Status': 'SLOW_IO',
+        },
+      ],
+      'RedoUndo': {
+        'RedoSwitchesLastHour': 4,
+        'RedoSwitches24h': 68,
+        'RedoRateMBPerSec': 18.4,
+        'HardParsesPerSec': 1.2,
+        'BufferCacheHitPct': 98.7,
+        'PGACacheHitPct': 96.4,
+        'ORA01555Count': 0,
+      },
+      'MemoryAdvisor': [
+        {
+          'AdvisorType': 'SGA',
+          'SizeMB': 24576,
+          'SizeFactor': 0.75,
+          'Recommendation': 'Sub-dimensionado (+18% DB Time)',
+        },
+        {
+          'AdvisorType': 'SGA',
+          'SizeMB': 32768,
+          'SizeFactor': 1.00,
+          'Recommendation': 'Tamaño actual configurado (BASE)',
+        },
+        {
+          'AdvisorType': 'SGA',
+          'SizeMB': 40960,
+          'SizeFactor': 1.25,
+          'Recommendation': 'ÓPTIMO: Ampliar a 40960 MB ahorra ~14% DB Time',
+        },
+        {
+          'AdvisorType': 'PGA',
+          'SizeMB': 8192,
+          'SizeFactor': 1.00,
+          'Recommendation': 'Tamaño actual configurado (96.4% Cache Hit)',
+        },
+      ],
+      'WaitChains': [
+        {
+          'ChainID': 1,
+          'LockedObject': 'CRM_DATA.CRM_CUSTOMERS',
+          'WaitSec': 342,
+          'ChainSummary': 'INST#2 SID:512 (CRM_ADMIN) ➔ INST#1 SID:289 (CRM_BATCH)',
+        },
+      ],
+      'ParallelQueries': [
+        {
+          'QCSID': 604,
+          'Username': 'BI_REPORT',
+          'SQLID': '7p2v90n1k4m2a',
+          'ReqDOP': 8,
+          'ActualDOP': 4,
+          'Status': 'DOP_DOWNGRADED',
+        },
+      ],
+      'AdvisorFindings': [
+        {
+          'Severity': 'CRITICAL',
+          'Category': 'SQL Plan Flip',
+          'Title': 'Regresión de Plan SQL detectada en SQL_ID 8f4k2m91x7p0q (23.5x más lento)',
+          'Detail': 'El plan actual PHV 3948102911 tarda 428.5 ms vs el mejor plan PHV 1049281744 (18.2 ms).',
+          'Suggestion': 'Fijar el plan óptimo PHV 1049281744 en SQL Plan Management (SPM Baseline).',
+          'Impact': 'ALTO (OLTP Latency)',
+          'ActionID': 'pin_sql_plan',
+          'ActionTarget': '8f4k2m91x7p0q:1049281744',
+        },
+        {
+          'Severity': 'CRITICAL',
+          'Category': 'Jobs Negocio',
+          'Title': 'Job CRM_DATA.JOB_SYNC_CREDIT_SCORES en estado FAILED (3 fallos en 24h)',
+          'Detail': 'ORA-01654: unable to extend index ERP_CORE.IDX_ORDERS_CUST_DT',
+          'Suggestion': 'Ampliar tablespace y relanzar el job mediante DBMS_SCHEDULER.RUN_JOB.',
+          'Impact': 'ALTO (Procesos Batch)',
+          'ActionID': 'run_scheduler_job',
+          'ActionTarget': 'CRM_DATA.JOB_SYNC_CREDIT_SCORES',
+        },
+        {
+          'Severity': 'WARNING',
+          'Category': 'Memoria SGA/PGA',
+          'Title': 'SGA Advisor sugiere ampliar SGA a 40960 MB (+25%) para ahorrar ~14% de DB Time',
+          'Detail': 'Reducción estimada de lecturas físicas de 4.82M a 2.91M.',
+          'Suggestion': 'Evaluar ampliación de SGA_TARGET verificando disponibilidad de HugePages.',
+          'Impact': 'MEDIO (Reducción I/O físico)',
+          'ActionID': 'tune_memory_advisor',
+          'ActionTarget': 'SGA:40960',
         },
       ],
     };

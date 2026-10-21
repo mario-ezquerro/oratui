@@ -226,13 +226,158 @@ type FilesystemMount struct {
 }
 
 type StoragePathInfo struct {
-	Name        string // mpatha / ORA_DATA_01 / fc_host0 / sdb / ASM:DATA01
-	Type        string // MULTIPATH, FC_HBA, ISCSI, BLOCK_DISK, ORACLEASM
-	WWIDOrModel string // WWID 36005... o Modelo de cabina/disco (PURE FlashArray, VMware Virtual)
-	Size        string // 500G, 1.0T, 16 Gbit
+	Name         string // mpatha / ORA_DATA_01 / fc_host0 / sdb / ASM:DATA01
+	Type         string // MULTIPATH, FC_HBA, ISCSI, BLOCK_DISK, ORACLEASM
+	WWIDOrModel  string // WWID 36005... o Modelo de cabina/disco (PURE FlashArray, VMware Virtual)
+	Size         string // 500G, 1.0T, 16 Gbit
 	PathsSummary string // 4/4 ACTIVE, 2/4 DEGRADED, Online, running
-	PathDetails string // sdb(OK), sdc(OK), sdd(OK), sde(OK) │ Scheduler: mq-deadline
-	Status      string // ONLINE, WARNING, OFFLINE, CRITICAL
+	PathDetails  string // sdb(OK), sdc(OK), sdd(OK), sde(OK) │ Scheduler: mq-deadline
+	Status       string // ONLINE, WARNING, OFFLINE, CRITICAL
+}
+
+// SQLPlanInstability represents a SQL_ID with multiple execution plans (Plan Flip / Regression).
+type SQLPlanInstability struct {
+	SQLID         string
+	Schema        string
+	PlanCount     int
+	Executions    int64
+	CurrentPHV    int64
+	BestPHV       int64
+	AvgElapsedMs  float64
+	BestElapsedMs float64
+	Adaptive      string // YES, NO
+	Status        string // REGRESSION, UNSTABLE, STABLE
+	SQLText       string
+}
+
+// RMANChannelProgress represents live RMAN backup/restore progress per channel (gv$session_longops + gv$backup_async_io).
+type RMANChannelProgress struct {
+	InstID      int
+	SID         int
+	Serial      int
+	Channel     string
+	Operation   string
+	SoFarMB     float64
+	TotalMB     float64
+	PctComplete float64
+	MBPerSec    float64
+	ETASec      int
+	CurrentFile string
+	Status      string // ACTIVE, COMPLETED
+}
+
+// SchedulerJobInfo represents business/DBA jobs from dba_scheduler_jobs and dba_jobs.
+type SchedulerJobInfo struct {
+	JobType      string // SCHEDULER, DBMS_JOB
+	Owner        string
+	JobName      string
+	State        string // SCHEDULED, RUNNING, SUCCEEDED, FAILED, BROKEN, DISABLED
+	Enabled      string // TRUE, FALSE
+	LastStart    string
+	NextRun      string
+	RunCount     int
+	FailureCount int
+	Failed24h    int
+	DurationSec  int
+	Detail       string
+}
+
+// RACCacheFusionStat represents Global Cache (GC) block transfer latency per RAC instance.
+type RACCacheFusionStat struct {
+	InstID            int
+	InstanceName      string
+	InterconnectIP    string
+	CRBlocksReceived  int64
+	CRBlockLatencyMs  float64
+	CurBlocksReceived int64
+	CurBlockLatencyMs float64
+	Status            string // OK, WARNING, CRITICAL
+}
+
+// DatafileIOStat represents per-datafile read/write latency from v$filestat.
+type DatafileIOStat struct {
+	FileID     int
+	FileName   string
+	Tablespace string
+	PhyReads   int64
+	PhyWrites  int64
+	AvgReadMs  float64
+	AvgWriteMs float64
+	ReadMB     float64
+	WriteMB    float64
+	Status     string // OK, SLOW_IO
+}
+
+// RedoUndoStat summarizes Redo log switch frequency, Undo health (ORA-01555), and sysmetric rates.
+type RedoUndoStat struct {
+	RedoSwitchesLastHour int
+	RedoSwitches24h      int
+	RedoRateMBPerSec     float64
+	HardParsesPerSec     float64
+	BufferCacheHitPct    float64
+	PGACacheHitPct       float64
+	UndoActiveMB         float64
+	UndoUnexpiredMB      float64
+	UndoExpiredMB        float64
+	MaxQueryLenSec       int
+	ORA01555Count        int
+	NoSpaceErrCount      int
+	TopIOFunction        string
+}
+
+// MemoryAdvisorEntry represents SGA and PGA target advice entries (v$sga_target_advice / v$pga_target_advice).
+type MemoryAdvisorEntry struct {
+	AdvisorType     string  // SGA, PGA, RESIZE_OP
+	SizeMB          int     // Size for estimate
+	SizeFactor      float64 // 0.75, 1.0, 1.25, 1.5...
+	EstDBTimeFactor float64 // For SGA advice
+	EstPhysReads    int64   // For SGA advice
+	EstHitPct       float64 // For PGA advice
+	OverallocCount  int     // For PGA advice
+	Recommendation  string
+}
+
+// WaitChainEntry represents multi-hop blocking wait chains (v$wait_chains).
+type WaitChainEntry struct {
+	ChainID      int
+	BlockerInst  int
+	BlockerSID   int
+	BlockerUser  string
+	WaiterInst   int
+	WaiterSID    int
+	WaiterUser   string
+	WaitEvent    string
+	WaitSec      int
+	LockedObject string
+	IsDeadlock   bool
+	ChainSummary string // e.g. "INST#2 SID:512 (CRM_ADMIN) ➔ INST#1 SID:289 (CRM_BATCH) ➔ INST#1 SID:415 (ERP_APP)"
+}
+
+// ParallelQueryStat represents active Parallel Execution (PX) coordinators and DOP downgrade detection (gv$px_session).
+type ParallelQueryStat struct {
+	InstID          int
+	QCSID           int
+	Username        string
+	SQLID           string
+	ReqDOP          int
+	ActualDOP       int
+	SlavesAllocated int
+	IsDowngraded    bool
+	WaitEvent       string
+	Status          string // OPTIMAL, DOP_DOWNGRADED
+}
+
+// AdvisorFinding represents an automated DBA/SRE diagnostic finding with a 1-click remediation action.
+type AdvisorFinding struct {
+	Severity     string // CRITICAL, WARNING, INFO
+	Category     string // Plan Flip, Cache Fusion, Jobs, I/O & Undo, RMAN, Memory, Locks, SAN
+	Title        string
+	Detail       string
+	Suggestion   string
+	Impact       string
+	SQLID        string
+	ActionID     string
+	ActionTarget string
 }
 
 type EnvironmentState struct {
@@ -269,4 +414,16 @@ type EnvironmentState struct {
 	OSMetrics       []OSHealthMetric
 	Filesystems     []FilesystemMount
 	StoragePaths    []StoragePathInfo
+
+	// New advanced diagnostics inspired by ora-brabo
+	PlanFlips       []SQLPlanInstability
+	RMANChannels    []RMANChannelProgress
+	SchedulerJobs   []SchedulerJobInfo
+	CacheFusion     []RACCacheFusionStat
+	DatafileIO      []DatafileIOStat
+	RedoUndo        RedoUndoStat
+	MemoryAdvisor   []MemoryAdvisorEntry
+	WaitChains      []WaitChainEntry
+	ParallelQueries []ParallelQueryStat
+	AdvisorFindings []AdvisorFinding
 }
