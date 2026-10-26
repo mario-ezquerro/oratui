@@ -139,6 +139,7 @@ func (r *Runner) RunCommand(
 		return "", err
 	}
 
+	const maxCmdOutputBytes = 512 * 1024
 	var outBuf bytes.Buffer
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -146,10 +147,15 @@ func (r *Runner) RunCommand(
 	streamReader := func(rc io.ReadCloser) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(rc)
+		buf := make([]byte, 0, 16*1024)
+		scanner.Buffer(buf, 128*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 			mu.Lock()
-			outBuf.WriteString(line + "\n")
+			if outBuf.Len()+len(line)+1 <= maxCmdOutputBytes {
+				outBuf.WriteString(line)
+				outBuf.WriteByte('\n')
+			}
 			mu.Unlock()
 			if onLine != nil {
 				onLine(line)
@@ -164,6 +170,133 @@ func (r *Runner) RunCommand(
 
 	err = cmd.Wait()
 	return strings.TrimSpace(outBuf.String()), err
+}
+
+// BatchSQLQuery represents a named SQL statement to execute inside a single shared sqlplus session.
+type BatchSQLQuery struct {
+	Key string
+	SQL string
+}
+
+const batchSectionPrefix = "===ORATUI_SECTION:"
+const batchSectionSuffix = "==="
+
+// RunSQLPlusBatch executes multiple SQL queries inside a SINGLE `sqlplus -s / as sysdba` OS process,
+// separating each query's output with `PROMPT ===ORATUI_SECTION:<Key>===` markers and `WHENEVER SQLERROR CONTINUE`.
+// This eliminates 90%+ of OS fork/exec overhead, Oracle shadow process creation, and stdout buffer allocations.
+func (r *Runner) RunSQLPlusBatch(
+	ctx context.Context,
+	oracleHome string,
+	oracleSID string,
+	owner *OwnerCreds,
+	queries []BatchSQLQuery,
+) (map[string][][]string, error) {
+	if len(queries) == 0 {
+		return nil, nil
+	}
+	if r.DryRun {
+		return make(map[string][][]string), nil
+	}
+
+	sqlplusBin := filepath.Join(oracleHome, "bin", "sqlplus")
+	var script strings.Builder
+	script.Grow(len(queries) * 512)
+	script.WriteString("SET PAGESIZE 0 FEEDBACK OFF VERIFY OFF HEADING OFF ECHO OFF TIMING OFF LINESIZE 32767 TRIMSPOOL ON COLSEP '|'\n")
+	script.WriteString("WHENEVER SQLERROR CONTINUE\n")
+	for _, q := range queries {
+		if q.Key == "" || strings.TrimSpace(q.SQL) == "" {
+			continue
+		}
+		script.WriteString("PROMPT ")
+		script.WriteString(batchSectionPrefix)
+		script.WriteString(q.Key)
+		script.WriteString(batchSectionSuffix)
+		script.WriteByte('\n')
+		script.WriteString(strings.TrimSpace(q.SQL))
+		script.WriteByte('\n')
+	}
+	script.WriteString("EXIT;\n")
+
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.DefaultTimeout)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(ctx, sqlplusBin, "-s", "/ as sysdba")
+	currentUID := uint32(os.Geteuid())
+	if owner != nil && owner.UID != 0 && currentUID == 0 && runtime.GOOS == "linux" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid: owner.UID,
+				Gid: owner.GID,
+			},
+		}
+	}
+
+	cmdEnv := os.Environ()
+	cmdEnv = append(cmdEnv,
+		"ORACLE_HOME="+oracleHome,
+		"ORACLE_SID="+oracleSID,
+		"PATH="+filepath.Join(oracleHome, "bin")+":"+os.Getenv("PATH"),
+		"NLS_LANG=AMERICAN_AMERICA.AL32UTF8",
+	)
+	cmd.Env = cmdEnv
+	cmd.Stdin = strings.NewReader(script.String())
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	results := ParseBatchSQLOutput(stdoutPipe)
+	waitErr := cmd.Wait()
+	return results, waitErr
+}
+
+// ParseBatchSQLOutput streams lines from r, splitting sections marked by `===ORATUI_SECTION:<Key>===`
+// and parsing pipe-delimited rows without allocating full-output intermediate strings.
+func ParseBatchSQLOutput(r io.Reader) map[string][][]string {
+	results := make(map[string][][]string, 8)
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 0, 16*1024)
+	scanner.Buffer(buf, 128*1024)
+
+	currentKey := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, batchSectionPrefix) && strings.HasSuffix(line, batchSectionSuffix) {
+			currentKey = line[len(batchSectionPrefix) : len(line)-len(batchSectionSuffix)]
+			if _, exists := results[currentKey]; !exists {
+				results[currentKey] = nil
+			}
+			continue
+		}
+		if currentKey == "" {
+			continue
+		}
+		// Skip SQL*Plus noise or SQL error lines when an optional view is unavailable
+		if strings.HasPrefix(line, "Connected to:") ||
+			strings.HasPrefix(line, "SQL>") ||
+			strings.HasPrefix(line, "ORA-") ||
+			strings.HasPrefix(line, "SP2-") ||
+			strings.HasPrefix(line, "ERROR") {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		row := make([]string, len(parts))
+		for i, p := range parts {
+			row[i] = strings.TrimSpace(p)
+		}
+		results[currentKey] = append(results[currentKey], row)
+	}
+	return results
 }
 
 // RunSQLPlus executes a SQL block via `sqlplus -s / as sysdba` with pipe-separated output (`|`)
@@ -235,18 +368,19 @@ EXIT;
 	return rows, outStr, err
 }
 
-// ParsePipeDelimitedOutput parses SQL*Plus COLSEP '|' output into trimmed fields.
+// ParsePipeDelimitedOutput parses SQL*Plus COLSEP '|' output into trimmed fields without full-file string split allocations.
 func ParsePipeDelimitedOutput(raw string) [][]string {
 	var rows [][]string
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "Connected to:") || strings.HasPrefix(line, "SQL>") {
 			continue
 		}
 		parts := strings.Split(line, "|")
-		row := make([]string, 0, len(parts))
-		for _, p := range parts {
-			row = append(row, strings.TrimSpace(p))
+		row := make([]string, len(parts))
+		for i, p := range parts {
+			row[i] = strings.TrimSpace(p)
 		}
 		rows = append(rows, row)
 	}

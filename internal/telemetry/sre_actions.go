@@ -367,9 +367,11 @@ func (e *Exporter) recordStateAndEvaluateSRE(s model.EnvironmentState, now time.
 		DataGuardApplyLagS: dgLag,
 	}
 
-	e.history = append(e.history, pt)
-	if len(e.history) > 90 {
-		e.history = e.history[len(e.history)-90:]
+	if len(e.history) < 90 {
+		e.history = append(e.history, pt)
+	} else {
+		copy(e.history, e.history[1:])
+		e.history[89] = pt
 	}
 
 	// Update rolling SRE SLI counters
@@ -390,12 +392,26 @@ func (e *Exporter) recordStateAndEvaluateSRE(s model.EnvironmentState, now time.
 	alerts := buildDelicateAlerts(s, now)
 	e.activeAlerts = alerts
 
+	cooldown := time.Duration(e.sloConfig.CooldownMinutes) * time.Minute
+	if cooldown <= 0 {
+		cooldown = 15 * time.Minute
+	}
+
+	// Prune expired alert cooldown entries so alertLastSent never grows unbounded over months of uptime
+	if len(e.alertLastSent) > 0 {
+		maxRetention := 2 * cooldown
+		for id, ts := range e.alertLastSent {
+			if now.Sub(ts) >= maxRetention {
+				delete(e.alertLastSent, id)
+			}
+		}
+		if len(e.alertLastSent) > 256 {
+			e.alertLastSent = make(map[string]time.Time, 32)
+		}
+	}
+
 	// Trigger automatic notifications for CRITICAL alerts if enabled and cooldown has elapsed
 	if e.sloConfig.AutoNotifyCritical && (e.sloConfig.TelegramEnabled || e.sloConfig.EmailEnabled) {
-		cooldown := time.Duration(e.sloConfig.CooldownMinutes) * time.Minute
-		if cooldown <= 0 {
-			cooldown = 15 * time.Minute
-		}
 		var newCriticals []DelicateAlert
 		for _, a := range alerts {
 			if a.Severity == "CRITICAL" {
@@ -692,7 +708,7 @@ func (e *Exporter) handleSREConfigUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var newCfg SLOConfig
-	if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&newCfg); err != nil {
 		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -754,7 +770,7 @@ func (e *Exporter) handleSRENotifyNow(w http.ResponseWriter, r *http.Request) {
 		var bodyOverride struct {
 			Config *SLOConfig `json:"config"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&bodyOverride); err == nil && bodyOverride.Config != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&bodyOverride); err == nil && bodyOverride.Config != nil {
 			override := *bodyOverride.Config
 			if override.TelegramBotToken == maskedSecretPlaceholder {
 				override.TelegramBotToken = cfg.TelegramBotToken
@@ -971,7 +987,7 @@ func (e *Exporter) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req ActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
 		return
 	}

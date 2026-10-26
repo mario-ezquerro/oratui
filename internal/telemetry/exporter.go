@@ -53,8 +53,10 @@ func NewExporter(initial model.EnvironmentState, listenAddr, version string) *Ex
 		lastUpdated:   now,
 		listenAddr:    listenAddr,
 		version:       version,
+		history:       make([]MetricHistoryPoint, 0, 90),
+		notifications: make([]NotificationEvent, 0, 50),
 		sloConfig:     defaultSLOConfig(),
-		alertLastSent: make(map[string]time.Time),
+		alertLastSent: make(map[string]time.Time, 32),
 		apiToken:      defaultAPIToken(),
 	}
 	exp.recordStateAndEvaluateSRE(initial, now)
@@ -114,6 +116,10 @@ func (e *Exporter) Start() (*http.Server, error) {
 		Addr:              e.listenAddr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 16,
 	}
 
 	e.mu.RLock()
@@ -220,6 +226,7 @@ func (e *Exporter) handlePrometheusMetrics(w http.ResponseWriter, r *http.Reques
 // RenderPrometheusMetrics renders 100% of EnvironmentState metrics in Prometheus / OpenMetrics text format.
 func RenderPrometheusMetrics(st model.EnvironmentState, updated time.Time, version string) string {
 	var b strings.Builder
+	b.Grow(16 * 1024)
 	host := st.HostName
 	if host == "" {
 		host = "localhost"

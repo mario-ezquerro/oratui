@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mario/ora-tui/internal/discovery"
@@ -11,14 +12,58 @@ import (
 	"github.com/mario/ora-tui/internal/model"
 )
 
-// CollectLiveEnvironment discovers and collects the full live Oracle environment state.
+type environmentMetaCache struct {
+	mu              sync.Mutex
+	lastDiscoverRun time.Time
+	env             *discovery.DiscoveredEnvironment
+	lastVersionRun  time.Time
+	version         string
+	lastNetworkRun  time.Time
+	listeners       []model.ListenerInfo
+}
+
+var metaCache environmentMetaCache
+
+// CollectLiveEnvironment discovers and collects the full live Oracle environment state
+// using tiered caching and batched SQL*Plus sessions to keep daemon RSS and CPU footprint minimal.
 func CollectLiveEnvironment(ctx context.Context, runner *executor.Runner) (*model.EnvironmentState, *discovery.DiscoveredEnvironment, error) {
-	env, err := discovery.Discover()
-	if err != nil {
-		return nil, nil, err
+	now := time.Now()
+
+	metaCache.mu.Lock()
+	cachedEnv := metaCache.env
+	needDiscover := cachedEnv == nil || now.Sub(metaCache.lastDiscoverRun) >= 60*time.Second
+	cachedVer := metaCache.version
+	needVersion := cachedVer == "" || cachedVer == "Unknown" || now.Sub(metaCache.lastVersionRun) >= 10*time.Minute
+	needNetwork := len(metaCache.listeners) == 0 || now.Sub(metaCache.lastNetworkRun) >= 30*time.Second
+	metaCache.mu.Unlock()
+
+	var env *discovery.DiscoveredEnvironment
+	if needDiscover {
+		discovered, err := discovery.Discover()
+		if err != nil {
+			if cachedEnv == nil {
+				return nil, nil, err
+			}
+			env = cachedEnv
+		} else {
+			env = discovered
+			metaCache.mu.Lock()
+			metaCache.env = env
+			metaCache.lastDiscoverRun = now
+			metaCache.mu.Unlock()
+		}
+	} else {
+		env = cachedEnv
 	}
 
-	version := discovery.DetectVersion(ctx, runner, env)
+	version := cachedVer
+	if needVersion {
+		version = discovery.DetectVersion(ctx, runner, env)
+		metaCache.mu.Lock()
+		metaCache.version = version
+		metaCache.lastVersionRun = now
+		metaCache.mu.Unlock()
+	}
 
 	oracleOwnerStr := "oracle"
 	if env.OracleOwner != nil {
@@ -48,7 +93,20 @@ func CollectLiveEnvironment(ctx context.Context, runner *executor.Runner) (*mode
 	sessions := CollectSessions(ctx, runner, env, activeSID)
 	diskgroups, tablespaces, datafiles, segments, invalidObjs := CollectStorage(ctx, runner, env, activeSID)
 	rmanBackups, restorePoints, alertEntries, alertTail, traceDir, alertSizeMB := CollectRMANDiag(ctx, runner, env, activeSID)
-	listeners := CollectNetwork(ctx, runner, env, crsResources)
+
+	var listeners []model.ListenerInfo
+	if needNetwork {
+		listeners = CollectNetwork(ctx, runner, env, crsResources)
+		metaCache.mu.Lock()
+		metaCache.listeners = listeners
+		metaCache.lastNetworkRun = now
+		metaCache.mu.Unlock()
+	} else {
+		metaCache.mu.Lock()
+		listeners = metaCache.listeners
+		metaCache.mu.Unlock()
+	}
+
 	osMetrics, filesystems, storagePaths := CollectOSHealth(ctx, runner, env)
 
 	clusterName := "N/A (Single Instance)"

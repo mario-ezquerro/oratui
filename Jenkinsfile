@@ -142,8 +142,8 @@ flutter_web_password=${params.FLUTTER_WEB_PASSWORD}
 grafana_admin_user=${params.FLUTTER_WEB_USER.trim()}
 grafana_admin_password=${params.FLUTTER_WEB_PASSWORD}
 oratui_api_token=${params.ORATUI_API_TOKEN}
-oratui_rpm_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.9.0-1.x86_64.rpm
-oratui_deb_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.9.0-1_amd64.deb
+oratui_rpm_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.10.0-1.x86_64.rpm
+oratui_deb_url=https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.10.0-1_amd64.deb
 """
                         writeFile(file: env.INVENTORY_PATH, text: generatedInventory, encoding: 'UTF-8')
                     }

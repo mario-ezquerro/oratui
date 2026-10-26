@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,12 +11,35 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mario/ora-tui/internal/discovery"
 	"github.com/mario/ora-tui/internal/executor"
 	"github.com/mario/ora-tui/internal/model"
 )
+
+var (
+	staticOSOnce     sync.Once
+	cachedNumCPUs    int
+	cachedCPUModel   string
+	cachedKernelRel  string
+	osStorageCacheMu sync.Mutex
+	lastOSStorageRun time.Time
+	cachedFS         []model.FilesystemMount
+	cachedSANPaths   []model.StoragePathInfo
+)
+
+func initStaticOSMetadata() {
+	staticOSOnce.Do(func() {
+		cachedNumCPUs, cachedCPUModel = readCPUInfo()
+		kernelRaw, _ := os.ReadFile("/proc/sys/kernel/osrelease")
+		cachedKernelRel = strings.TrimSpace(string(kernelRaw))
+		if cachedKernelRel == "" {
+			cachedKernelRel = "Linux"
+		}
+	})
+}
 
 // CollectOSHealth gathers comprehensive Linux server health metrics:
 // 1. CPU cores, Load Average (1m/5m/15m), Uptime, Kernel version
@@ -24,17 +49,13 @@ import (
 // 5. Mounted Filesystems (df -PTm) + Inode exhaustion checks (df -Pi)
 // 6. SAN Multipath LUNs & paths (multipath -ll), Fibre Channel HBAs (/sys/class/fc_host), OracleASM disks, and Block Disks (/sys/block)
 func CollectOSHealth(ctx context.Context, runner *executor.Runner, env *discovery.DiscoveredEnvironment) ([]model.OSHealthMetric, []model.FilesystemMount, []model.StoragePathInfo) {
-	var metrics []model.OSHealthMetric
+	metrics := make([]model.OSHealthMetric, 0, 7)
 
-	// 1. CPU, Load Average & Uptime
-	numCPUs, cpuModel := readCPUInfo()
+	// 1. CPU, Load Average & Uptime (static CPU/kernel cached via sync.Once)
+	initStaticOSMetadata()
+	numCPUs, cpuModel, kernelVer := cachedNumCPUs, cachedCPUModel, cachedKernelRel
 	loadavgRaw, _ := os.ReadFile("/proc/loadavg")
 	uptimeRaw, _ := os.ReadFile("/proc/uptime")
-	kernelRaw, _ := os.ReadFile("/proc/sys/kernel/osrelease")
-	kernelVer := strings.TrimSpace(string(kernelRaw))
-	if kernelVer == "" {
-		kernelVer = "Linux"
-	}
 
 	load1, load5, load15, procRatio := parseLoadAvg(string(loadavgRaw))
 	uptimeStr := parseUptime(string(uptimeRaw))
@@ -228,21 +249,36 @@ func CollectOSHealth(ctx context.Context, runner *executor.Runner, env *discover
 		Recommendation: "Descriptores de fichero (fs.file-max) y kernel operativos",
 	})
 
-	// 7. Filesystems & Inodes (df -PTm + df -Pi)
-	var filesystems []model.FilesystemMount
-	if runner != nil {
-		envMap := map[string]string{"LC_ALL": "C"}
-		dfCtx1, cancel1 := context.WithTimeout(ctx, 3*time.Second)
-		dfBlocksOut, _ := runner.RunCommand(dfCtx1, nil, false, envMap, nil, "df", "-PTm")
-		cancel1()
-		dfCtx2, cancel2 := context.WithTimeout(ctx, 3*time.Second)
-		dfInodesOut, _ := runner.RunCommand(dfCtx2, nil, false, envMap, nil, "df", "-Pi")
-		cancel2()
-		filesystems = ParseDFOutput(dfBlocksOut, dfInodesOut)
+	// 7 & 8. Filesystems, Inodes (df -PTm + df -Pi) & SAN Multipath/FC HBA paths (cached with 30s TTL to reduce OS subprocess forks)
+	now := time.Now()
+	osStorageCacheMu.Lock()
+	needStorageRefresh := now.Sub(lastOSStorageRun) >= 30*time.Second || (len(cachedFS) == 0 && len(cachedSANPaths) == 0)
+	osStorageCacheMu.Unlock()
+
+	if needStorageRefresh {
+		var fsList []model.FilesystemMount
+		if runner != nil {
+			envMap := map[string]string{"LC_ALL": "C"}
+			dfCtx1, cancel1 := context.WithTimeout(ctx, 3*time.Second)
+			dfBlocksOut, _ := runner.RunCommand(dfCtx1, nil, false, envMap, nil, "df", "-PTm")
+			cancel1()
+			dfCtx2, cancel2 := context.WithTimeout(ctx, 3*time.Second)
+			dfInodesOut, _ := runner.RunCommand(dfCtx2, nil, false, envMap, nil, "df", "-Pi")
+			cancel2()
+			fsList = ParseDFOutput(dfBlocksOut, dfInodesOut)
+		}
+		sanList := collectStoragePaths(ctx, runner)
+		osStorageCacheMu.Lock()
+		cachedFS = fsList
+		cachedSANPaths = sanList
+		lastOSStorageRun = now
+		osStorageCacheMu.Unlock()
 	}
 
-	// 8. Storage Paths: Multipath SAN, FC HBA, OracleASM & Block Disks
-	storagePaths := collectStoragePaths(ctx, runner)
+	osStorageCacheMu.Lock()
+	filesystems := cachedFS
+	storagePaths := cachedSANPaths
+	osStorageCacheMu.Unlock()
 
 	return metrics, filesystems, storagePaths
 }
@@ -254,7 +290,9 @@ func readCPUInfo() (int, string) {
 	}
 	count := 0
 	modelName := ""
-	for _, line := range strings.Split(string(raw), "\n") {
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	for scanner.Scan() {
+		line := scanner.Text()
 		if strings.HasPrefix(line, "processor") {
 			count++
 		} else if modelName == "" && strings.HasPrefix(line, "model name") {

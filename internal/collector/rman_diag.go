@@ -1,18 +1,38 @@
 package collector
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mario/ora-tui/internal/discovery"
 	"github.com/mario/ora-tui/internal/executor"
 	"github.com/mario/ora-tui/internal/model"
 )
+
+type rmanDiagStateCache struct {
+	mu            sync.Mutex
+	sid           string
+	traceDir      string
+	lastSQLRun    time.Time
+	backups       []model.RMANBackupJob
+	restorePoints []model.RestorePoint
+	alertPath     string
+	alertSize     int64
+	alertModTime  time.Time
+	alertEntries  []model.AlertLogEntry
+	tailLines     []string
+	fileSizeMB    float64
+}
+
+var rmanCache rmanDiagStateCache
 
 const sqlRMANBackupsQuery = `
 SELECT * FROM (
@@ -113,22 +133,34 @@ func isPatchOrBannerLine(line string) bool {
 		strings.Contains(u, "CREATED ON")
 }
 
-// ReadTailAlertLogFile reads the last ~256KB of alert_<SID>.log for instantaneous, non-blocking ORA- error analysis and live tail.
+// ReadTailAlertLogFile reads the last ~128KB of alert_<SID>.log for instantaneous, non-blocking ORA- error analysis and live tail.
+// Uses file size + mtime caching to skip disk I/O and memory allocations when alert_<SID>.log has not changed.
 func ReadTailAlertLogFile(traceDir, dbSID string) ([]model.AlertLogEntry, []string, float64) {
 	alertFile := filepath.Join(traceDir, "alert_"+dbSID+".log")
-	f, err := os.Open(alertFile)
-	if err != nil {
-		return nil, nil, 0
-	}
-	defer f.Close()
-
-	stat, err := f.Stat()
+	stat, err := os.Stat(alertFile)
 	if err != nil {
 		return nil, nil, 0
 	}
 	size := stat.Size()
+	modTime := stat.ModTime()
 	fileSizeMB := float64(size) / 1024.0 / 1024.0
-	const maxTail = 262144
+
+	rmanCache.mu.Lock()
+	if rmanCache.alertPath == alertFile && rmanCache.alertSize == size && rmanCache.alertModTime.Equal(modTime) {
+		entries := rmanCache.alertEntries
+		tail := rmanCache.tailLines
+		rmanCache.mu.Unlock()
+		return entries, tail, fileSizeMB
+	}
+	rmanCache.mu.Unlock()
+
+	f, err := os.Open(alertFile)
+	if err != nil {
+		return nil, nil, fileSizeMB
+	}
+	defer f.Close()
+
+	const maxTail = 131072 // 128 KB window is plenty for recent ORA- errors and 15 tail lines
 	offset := int64(0)
 	if size > maxTail {
 		offset = size - maxTail
@@ -140,13 +172,13 @@ func ReadTailAlertLogFile(traceDir, dbSID string) ([]model.AlertLogEntry, []stri
 	}
 
 	var matched []model.AlertLogEntry
-	var cleanLines []string
+	tailRing := make([]string, 0, 15)
 	lastTS := time.Now().Format("2006-01-02 15:04:05")
 	inPatchDump := false
-	lines := strings.Split(string(buf), "\n")
 
-	for i := 0; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
+	scanner := bufio.NewScanner(bytes.NewReader(buf))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
@@ -163,7 +195,13 @@ func ReadTailAlertLogFile(traceDir, dbSID string) ([]model.AlertLogEntry, []stri
 		if inPatchDump || isPatchOrBannerLine(line) || strings.HasPrefix(line, "===") || strings.HasPrefix(line, "***") {
 			continue
 		}
-		cleanLines = append(cleanLines, "["+lastTS+"] "+line)
+		formattedLine := "[" + lastTS + "] " + line
+		if len(tailRing) < 15 {
+			tailRing = append(tailRing, formattedLine)
+		} else {
+			copy(tailRing, tailRing[1:])
+			tailRing[14] = formattedLine
+		}
 		if m := oraCodeRegex.FindStringSubmatch(line); len(m) >= 2 {
 			code := m[1]
 			matched = append(matched, model.AlertLogEntry{
@@ -177,40 +215,78 @@ func ReadTailAlertLogFile(traceDir, dbSID string) ([]model.AlertLogEntry, []stri
 	}
 
 	// Return newest ORA- entries first (up to 50)
-	var entries []model.AlertLogEntry
+	entriesCap := len(matched)
+	if entriesCap > 50 {
+		entriesCap = 50
+	}
+	entries := make([]model.AlertLogEntry, 0, entriesCap)
 	for i := len(matched) - 1; i >= 0 && len(entries) < 50; i-- {
 		entries = append(entries, matched[i])
 	}
 
-	// Return last 15 clean tail lines (most recent at the bottom, like `tail -n 15`)
-	tailStart := 0
-	if len(cleanLines) > 15 {
-		tailStart = len(cleanLines) - 15
-	}
-	return entries, cleanLines[tailStart:], fileSizeMB
+	rmanCache.mu.Lock()
+	rmanCache.alertPath = alertFile
+	rmanCache.alertSize = size
+	rmanCache.alertModTime = modTime
+	rmanCache.alertEntries = entries
+	rmanCache.tailLines = tailRing
+	rmanCache.fileSizeMB = fileSizeMB
+	rmanCache.mu.Unlock()
+
+	return entries, tailRing, fileSizeMB
 }
 
-// CollectRMANDiag queries RMAN backup jobs, Flashback restore points, and Alert Log ORA- entries + live tail.
+// CollectRMANDiag queries RMAN backup jobs, Flashback restore points, and Alert Log ORA- entries + live tail
+// using a 60s SQL cache for RMAN/RestorePoint history and permanent caching for Diag Trace path.
 func CollectRMANDiag(
 	ctx context.Context,
 	runner *executor.Runner,
 	env *discovery.DiscoveredEnvironment,
 	dbSID string,
 ) ([]model.RMANBackupJob, []model.RestorePoint, []model.AlertLogEntry, []string, string, float64) {
-	if env.OracleHome == "" || dbSID == "" {
+	if env == nil || env.OracleHome == "" || dbSID == "" {
 		return nil, nil, nil, nil, "", 0
 	}
-	bkpRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlRMANBackupsQuery, nil)
-	rpRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlRestorePointsQuery, nil)
+
+	now := time.Now()
+	rmanCache.mu.Lock()
+	sidChanged := rmanCache.sid != dbSID
+	needTraceDir := sidChanged || rmanCache.traceDir == ""
+	needSQL := sidChanged || now.Sub(rmanCache.lastSQLRun) >= 60*time.Second
+	rmanCache.mu.Unlock()
+
+	if needSQL || needTraceDir {
+		batch := []executor.BatchSQLQuery{
+			{Key: "backups", SQL: sqlRMANBackupsQuery},
+			{Key: "restore_points", SQL: sqlRestorePointsQuery},
+		}
+		if needTraceDir {
+			batch = append(batch, executor.BatchSQLQuery{Key: "trace_dir", SQL: sqlDiagTraceDirQuery})
+		}
+		res, _ := runner.RunSQLPlusBatch(ctx, env.OracleHome, dbSID, env.OracleOwner, batch)
+		rmanCache.mu.Lock()
+		rmanCache.sid = dbSID
+		rmanCache.backups = ParseRMANBackupRows(res["backups"])
+		rmanCache.restorePoints = ParseRestorePointRows(res["restore_points"])
+		if needTraceDir && len(res["trace_dir"]) > 0 && len(res["trace_dir"][0]) > 0 {
+			rmanCache.traceDir = strings.TrimSpace(res["trace_dir"][0][0])
+		}
+		rmanCache.lastSQLRun = now
+		rmanCache.mu.Unlock()
+	}
+
+	rmanCache.mu.Lock()
+	backups := rmanCache.backups
+	restorePoints := rmanCache.restorePoints
+	traceDir := rmanCache.traceDir
+	rmanCache.mu.Unlock()
 
 	var alertEntries []model.AlertLogEntry
 	var tailLines []string
-	var traceDir string
 	var fileSizeMB float64
-	if traceRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlDiagTraceDirQuery, nil); err == nil && len(traceRows) > 0 && len(traceRows[0]) > 0 {
-		traceDir = strings.TrimSpace(traceRows[0][0])
+	if traceDir != "" {
 		alertEntries, tailLines, fileSizeMB = ReadTailAlertLogFile(traceDir, dbSID)
 	}
 
-	return ParseRMANBackupRows(bkpRows), ParseRestorePointRows(rpRows), alertEntries, tailLines, traceDir, fileSizeMB
+	return backups, restorePoints, alertEntries, tailLines, traceDir, fileSizeMB
 }

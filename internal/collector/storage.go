@@ -3,11 +3,27 @@ package collector
 import (
 	"context"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/mario/ora-tui/internal/discovery"
 	"github.com/mario/ora-tui/internal/executor"
 	"github.com/mario/ora-tui/internal/model"
 )
+
+type storageMetricsCache struct {
+	mu          sync.Mutex
+	sid         string
+	lastMedRun  time.Time
+	lastHvyRun  time.Time
+	diskgroups  []model.ASMDiskgroup
+	tablespaces []model.TablespaceInfo
+	datafiles   []model.DatafileInfo
+	segments    []model.TableSegment
+	invalids    []model.InvalidObject
+}
+
+var storCache storageMetricsCache
 
 const sqlASMDiskgroupsQuery = `
 SELECT
@@ -244,7 +260,8 @@ func ParseInvalidObjectRows(rows [][]string) []model.InvalidObject {
 	return list
 }
 
-// CollectStorage queries ASM diskgroups, tablespaces, datafiles, top tables/segments, and invalid objects.
+// CollectStorage queries ASM diskgroups, tablespaces, datafiles, top tables/segments, and invalid objects
+// using tiered caching (30s for capacity, 60s for heavy dictionary views) and a single batched SQL*Plus session.
 func CollectStorage(
 	ctx context.Context,
 	runner *executor.Runner,
@@ -257,25 +274,55 @@ func CollectStorage(
 	[]model.TableSegment,
 	[]model.InvalidObject,
 ) {
-	var diskgroups []model.ASMDiskgroup
-	if env.OracleHome != "" && dbSID != "" {
-		if dgRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlASMDiskgroupsQuery, nil); err == nil {
-			diskgroups = ParseASMDiskgroupRows(dgRows)
+	if env == nil || env.OracleHome == "" || dbSID == "" {
+		return nil, nil, nil, nil, nil
+	}
+
+	now := time.Now()
+	storCache.mu.Lock()
+	sidChanged := storCache.sid != dbSID
+	runMed := sidChanged || now.Sub(storCache.lastMedRun) >= 30*time.Second || len(storCache.tablespaces) == 0
+	runHvy := sidChanged || now.Sub(storCache.lastHvyRun) >= 60*time.Second || len(storCache.datafiles) == 0
+	storCache.mu.Unlock()
+
+	var batch []executor.BatchSQLQuery
+	if runMed {
+		batch = append(batch,
+			executor.BatchSQLQuery{Key: "asm_dg", SQL: sqlASMDiskgroupsQuery},
+			executor.BatchSQLQuery{Key: "tablespaces", SQL: sqlTablespacesQuery},
+		)
+	}
+	if runHvy {
+		batch = append(batch,
+			executor.BatchSQLQuery{Key: "datafiles", SQL: sqlDatafilesQuery},
+			executor.BatchSQLQuery{Key: "segments", SQL: sqlTopSegmentsQuery},
+			executor.BatchSQLQuery{Key: "invalids", SQL: sqlInvalidObjectsQuery},
+		)
+	}
+
+	if len(batch) > 0 {
+		res, _ := runner.RunSQLPlusBatch(ctx, env.OracleHome, dbSID, env.OracleOwner, batch)
+		storCache.mu.Lock()
+		storCache.sid = dbSID
+		if runMed {
+			storCache.diskgroups = ParseASMDiskgroupRows(res["asm_dg"])
+			storCache.tablespaces = ParseTablespaceRows(res["tablespaces"])
+			storCache.lastMedRun = now
 		}
+		if runHvy {
+			storCache.datafiles = ParseDatafileRows(res["datafiles"])
+			storCache.segments = ParseTableSegmentRows(res["segments"])
+			storCache.invalids = ParseInvalidObjectRows(res["invalids"])
+			storCache.lastHvyRun = now
+		}
+		storCache.mu.Unlock()
 	}
 
-	if env.OracleHome == "" || dbSID == "" {
-		return diskgroups, nil, nil, nil, nil
-	}
-
-	tbsRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlTablespacesQuery, nil)
-	dfRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlDatafilesQuery, nil)
-	segRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlTopSegmentsQuery, nil)
-	invRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, dbSID, env.OracleOwner, sqlInvalidObjectsQuery, nil)
-
-	return diskgroups,
-		ParseTablespaceRows(tbsRows),
-		ParseDatafileRows(dfRows),
-		ParseTableSegmentRows(segRows),
-		ParseInvalidObjectRows(invRows)
+	storCache.mu.Lock()
+	defer storCache.mu.Unlock()
+	return storCache.diskgroups,
+		storCache.tablespaces,
+		storCache.datafiles,
+		storCache.segments,
+		storCache.invalids
 }

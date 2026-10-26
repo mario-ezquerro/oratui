@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -17,7 +18,7 @@ import (
 	"github.com/mario/ora-tui/internal/ui"
 )
 
-const AppVersion = "1.9.0"
+const AppVersion = "1.10.0"
 
 func main() {
 	mockFlag := flag.Bool("mock", false, "Force interactive mock/simulation mode with sample Oracle data")
@@ -116,12 +117,22 @@ func main() {
 	runHeadless := *daemonFlag || (otelEnabled && !isTTY)
 
 	if runHeadless {
-		fmt.Printf("[ORA-TUI v%s] Daemon OpenTelemetry, SRE/SLO & Remote Action API iniciado en %s (Host=%s, Modo=%s, Intervalo=%s)\n",
+		// Tune Go GC and soft memory ceiling so the headless daemon maintains a tiny, flat RSS footprint (< 20-35 MB)
+		if os.Getenv("GOGC") == "" {
+			debug.SetGCPercent(50)
+		}
+		if os.Getenv("GOMEMLIMIT") == "" {
+			debug.SetMemoryLimit(48 * 1024 * 1024) // 48 MiB soft limit
+		}
+		debug.FreeOSMemory()
+
+		fmt.Printf("[ORA-TUI v%s] Daemon OpenTelemetry, SRE/SLO & Remote Action API iniciado en %s (Host=%s, Modo=%s, Intervalo=%s, GOMEMLIMIT=48MiB)\n",
 			AppVersion, listenAddr, state.HostName, state.Topology, intervalFlag.String())
 		fmt.Printf("[ORA-TUI v%s] Endpoints activos:\n", AppVersion)
 		fmt.Printf("  • Prometheus / OpenMetrics : http://%s/metrics\n", listenAddr)
 		fmt.Printf("  • OpenTelemetry OTLP JSON  : http://%s/otel/v1/metrics\n", listenAddr)
 		fmt.Printf("  • Snapshot Estado JSON     : http://%s/api/v1/state\n", listenAddr)
+		fmt.Printf("  • Informe Ejecutivo HTML   : http://%s/api/v1/report\n", listenAddr)
 		fmt.Printf("  • SRE, SLO & Telegram/SMTP : http://%s/api/v1/sre\n", listenAddr)
 		fmt.Printf("  • Ejecución Remota Acciones: http://%s/api/v1/action\n", listenAddr)
 
@@ -135,12 +146,14 @@ func main() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
+		tickCount := 0
 		for {
 			select {
 			case sig := <-sigCh:
 				fmt.Printf("[ORA-TUI v%s] Señal %v recibida, deteniendo daemon OpenTelemetry...\n", AppVersion, sig)
 				return
 			case <-ticker.C:
+				tickCount++
 				if !state.IsMock {
 					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 					updated, _, err := collector.CollectLiveEnvironment(ctx, runner)
@@ -151,6 +164,9 @@ func main() {
 				}
 				if otelExp != nil {
 					otelExp.UpdateState(*state)
+				}
+				if tickCount%20 == 0 {
+					debug.FreeOSMemory()
 				}
 			}
 		}

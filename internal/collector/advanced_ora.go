@@ -432,7 +432,8 @@ func ParseMemoryAdvisorRows(rows [][]string) []model.MemoryAdvisorEntry {
 	return out
 }
 
-// CollectAdvancedOracleMetrics executes the tiered queries inspired by ora-brabo and populates state.
+// CollectAdvancedOracleMetrics executes the tiered queries inspired by ora-brabo inside a SINGLE batched
+// sqlplus connection per cycle, minimizing OS process forks, PGA allocations, and Go heap usage.
 func CollectAdvancedOracleMetrics(ctx context.Context, runner *executor.Runner, env *discovery.DiscoveredEnvironment, sid string, state *model.EnvironmentState) {
 	if state == nil {
 		return
@@ -443,17 +444,44 @@ func CollectAdvancedOracleMetrics(ctx context.Context, runner *executor.Runner, 
 	}
 
 	now := time.Now()
+	advCache.mu.Lock()
+	runMedium := now.Sub(advCache.lastMediumRun) >= 30*time.Second || len(advCache.planFlips) == 0
+	runHeavy := now.Sub(advCache.lastHeavyRun) >= 60*time.Second || len(advCache.schedulerJobs) == 0
+	advCache.mu.Unlock()
+
+	batch := make([]executor.BatchSQLQuery, 0, 9)
+	batch = append(batch,
+		executor.BatchSQLQuery{Key: "rman_channels", SQL: sqlRMANChannelsQuery},
+		executor.BatchSQLQuery{Key: "redo_undo", SQL: sqlRedoUndoSummaryQuery},
+		executor.BatchSQLQuery{Key: "wait_chains", SQL: sqlWaitChainsQuery},
+		executor.BatchSQLQuery{Key: "px_dop", SQL: sqlParallelQueryDOPQuery},
+	)
+	if env.Topology == model.ModeRAC {
+		batch = append(batch, executor.BatchSQLQuery{Key: "cache_fusion", SQL: sqlRACCacheFusionQuery})
+	}
+	if runMedium {
+		batch = append(batch,
+			executor.BatchSQLQuery{Key: "plan_flips", SQL: sqlPlanInstabilityQuery},
+			executor.BatchSQLQuery{Key: "datafile_io", SQL: sqlDatafileIOQuery},
+			executor.BatchSQLQuery{Key: "mem_advisor", SQL: sqlMemoryAdvisorQuery},
+		)
+	}
+	if runHeavy {
+		batch = append(batch, executor.BatchSQLQuery{Key: "scheduler_jobs", SQL: sqlSchedulerJobsQuery})
+	}
+
+	batchRes, _ := runner.RunSQLPlusBatch(ctx, env.OracleHome, sid, env.OracleOwner, batch)
 
 	// ── Tier 1 (Fast: every scrape) ──────────────────────────────────────────
-	if chRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlRMANChannelsQuery, nil); err == nil {
+	if chRows := batchRes["rman_channels"]; len(chRows) > 0 {
 		state.RMANChannels = ParseRMANChannelRows(chRows)
 	}
 	if env.Topology == model.ModeRAC {
-		if cfRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlRACCacheFusionQuery, nil); err == nil {
+		if cfRows := batchRes["cache_fusion"]; len(cfRows) > 0 {
 			state.CacheFusion = ParseRACCacheFusionRows(cfRows)
 		}
 	}
-	if ruRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlRedoUndoSummaryQuery, nil); err == nil && len(ruRows) > 0 && len(ruRows[0]) >= 12 {
+	if ruRows := batchRes["redo_undo"]; len(ruRows) > 0 && len(ruRows[0]) >= 12 {
 		r := ruRows[0]
 		sw1h, _ := strconv.Atoi(r[0])
 		sw24h, _ := strconv.Atoi(r[1])
@@ -483,104 +511,72 @@ func CollectAdvancedOracleMetrics(ctx context.Context, runner *executor.Runner, 
 			TopIOFunction:        "DBWR / LGWR / Smart Scan",
 		}
 	}
-	if wcRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlWaitChainsQuery, nil); err == nil {
-		for _, r := range wcRows {
-			if len(r) < 9 {
-				continue
-			}
-			cid, _ := strconv.Atoi(r[0])
-			bInst, _ := strconv.Atoi(r[1])
-			bSID, _ := strconv.Atoi(r[2])
-			wInst, _ := strconv.Atoi(r[3])
-			wSID, _ := strconv.Atoi(r[4])
-			wSec, _ := strconv.Atoi(r[6])
-			isDeadlock := strings.EqualFold(strings.TrimSpace(r[7]), "TRUE")
-			state.WaitChains = append(state.WaitChains, model.WaitChainEntry{
-				ChainID:      cid,
-				BlockerInst:  bInst,
-				BlockerSID:   bSID,
-				BlockerUser:  "BLOCKER",
-				WaiterInst:   wInst,
-				WaiterSID:    wSID,
-				WaiterUser:   "WAITER",
-				WaitEvent:    r[5],
-				WaitSec:      wSec,
-				LockedObject: r[8],
-				IsDeadlock:   isDeadlock,
-				ChainSummary: fmt.Sprintf("INST#%d SID:%d ➔ bloquea a INST#%d SID:%d (%ds en %s)", bInst, bSID, wInst, wSID, wSec, r[5]),
-			})
+	for _, r := range batchRes["wait_chains"] {
+		if len(r) < 9 {
+			continue
 		}
+		cid, _ := strconv.Atoi(r[0])
+		bInst, _ := strconv.Atoi(r[1])
+		bSID, _ := strconv.Atoi(r[2])
+		wInst, _ := strconv.Atoi(r[3])
+		wSID, _ := strconv.Atoi(r[4])
+		wSec, _ := strconv.Atoi(r[6])
+		isDeadlock := strings.EqualFold(strings.TrimSpace(r[7]), "TRUE")
+		state.WaitChains = append(state.WaitChains, model.WaitChainEntry{
+			ChainID:      cid,
+			BlockerInst:  bInst,
+			BlockerSID:   bSID,
+			BlockerUser:  "BLOCKER",
+			WaiterInst:   wInst,
+			WaiterSID:    wSID,
+			WaiterUser:   "WAITER",
+			WaitEvent:    r[5],
+			WaitSec:      wSec,
+			LockedObject: r[8],
+			IsDeadlock:   isDeadlock,
+			ChainSummary: fmt.Sprintf("INST#%d SID:%d ➔ bloquea a INST#%d SID:%d (%ds en %s)", bInst, bSID, wInst, wSID, wSec, r[5]),
+		})
 	}
-	if pxRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlParallelQueryDOPQuery, nil); err == nil {
-		for _, r := range pxRows {
-			if len(r) < 8 {
-				continue
-			}
-			instID, _ := strconv.Atoi(r[0])
-			qcSID, _ := strconv.Atoi(r[1])
-			reqDOP, _ := strconv.Atoi(r[4])
-			actDOP, _ := strconv.Atoi(r[5])
-			slaves, _ := strconv.Atoi(r[6])
-			downgraded := reqDOP > actDOP
-			st := "OPTIMAL"
-			if downgraded {
-				st = "DOP_DOWNGRADED"
-			}
-			state.ParallelQueries = append(state.ParallelQueries, model.ParallelQueryStat{
-				InstID:          instID,
-				QCSID:           qcSID,
-				Username:        r[2],
-				SQLID:           r[3],
-				ReqDOP:          reqDOP,
-				ActualDOP:       actDOP,
-				SlavesAllocated: slaves,
-				IsDowngraded:    downgraded,
-				WaitEvent:       r[7],
-				Status:          st,
-			})
+	for _, r := range batchRes["px_dop"] {
+		if len(r) < 8 {
+			continue
 		}
+		instID, _ := strconv.Atoi(r[0])
+		qcSID, _ := strconv.Atoi(r[1])
+		reqDOP, _ := strconv.Atoi(r[4])
+		actDOP, _ := strconv.Atoi(r[5])
+		slaves, _ := strconv.Atoi(r[6])
+		downgraded := reqDOP > actDOP
+		st := "OPTIMAL"
+		if downgraded {
+			st = "DOP_DOWNGRADED"
+		}
+		state.ParallelQueries = append(state.ParallelQueries, model.ParallelQueryStat{
+			InstID:          instID,
+			QCSID:           qcSID,
+			Username:        r[2],
+			SQLID:           r[3],
+			ReqDOP:          reqDOP,
+			ActualDOP:       actDOP,
+			SlavesAllocated: slaves,
+			IsDowngraded:    downgraded,
+			WaitEvent:       r[7],
+			Status:          st,
+		})
 	}
 
-	// ── Tier 2 (Medium: every 30s) ───────────────────────────────────────────
+	// ── Tier 2 (Medium: every 30s) & Tier 3 (Heavy: every 60s) ───────────────
 	advCache.mu.Lock()
-	runMedium := now.Sub(advCache.lastMediumRun) >= 30*time.Second || len(advCache.planFlips) == 0
-	runHeavy := now.Sub(advCache.lastHeavyRun) >= 60*time.Second || len(advCache.schedulerJobs) == 0
-	advCache.mu.Unlock()
-
 	if runMedium {
-		var pf []model.SQLPlanInstability
-		var dfIO []model.DatafileIOStat
-		var memAdv []model.MemoryAdvisorEntry
-		if pfRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlPlanInstabilityQuery, nil); err == nil {
-			pf = ParsePlanInstabilityRows(pfRows)
-		}
-		if ioRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlDatafileIOQuery, nil); err == nil {
-			dfIO = ParseDatafileIORows(ioRows)
-		}
-		if memRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlMemoryAdvisorQuery, nil); err == nil {
-			memAdv = ParseMemoryAdvisorRows(memRows)
-		}
-		advCache.mu.Lock()
-		advCache.planFlips = pf
-		advCache.datafileIO = dfIO
-		advCache.memoryAdvisor = memAdv
+		advCache.planFlips = ParsePlanInstabilityRows(batchRes["plan_flips"])
+		advCache.datafileIO = ParseDatafileIORows(batchRes["datafile_io"])
+		advCache.memoryAdvisor = ParseMemoryAdvisorRows(batchRes["mem_advisor"])
 		advCache.lastMediumRun = now
-		advCache.mu.Unlock()
 	}
-
-	// ── Tier 3 (Heavy: every 60s) ────────────────────────────────────────────
 	if runHeavy {
-		var jobs []model.SchedulerJobInfo
-		if jobRows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlSchedulerJobsQuery, nil); err == nil {
-			jobs = ParseSchedulerJobRows(jobRows)
-		}
-		advCache.mu.Lock()
-		advCache.schedulerJobs = jobs
+		advCache.schedulerJobs = ParseSchedulerJobRows(batchRes["scheduler_jobs"])
 		advCache.lastHeavyRun = now
-		advCache.mu.Unlock()
 	}
-
-	advCache.mu.Lock()
 	state.PlanFlips = advCache.planFlips
 	state.DatafileIO = advCache.datafileIO
 	state.MemoryAdvisor = advCache.memoryAdvisor

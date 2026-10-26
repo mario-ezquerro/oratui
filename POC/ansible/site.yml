@@ -1,6 +1,6 @@
 ---
 # ==============================================================================
-# Playbook Maestro de Observabilidad y Operación Activa con ora-tui (v1.9.0)
+# Playbook Maestro de Observabilidad y Operación Activa con ora-tui (v1.10.0)
 #
 # Uso completo (instala daemon en servidores Oracle + actualiza Flutter Web/Prometheus/Grafana):
 #   ansible-playbook -i inventory.ini site.yml
@@ -24,8 +24,8 @@
   vars:
     node_otel_port: "{{ otel_port | default(default_otel_port | default(9161)) }}"
     node_interval: "{{ oratui_scrape_interval | default('10s') }}"
-    local_rpm_path: "{{ playbook_dir }}/../../dist/ora-tui-1.9.0-1.x86_64.rpm"
-    local_deb_path: "{{ playbook_dir }}/../../dist/ora-tui_1.9.0-1_amd64.deb"
+    local_rpm_path: "{{ playbook_dir }}/../../dist/ora-tui-1.10.0-1.x86_64.rpm"
+    local_deb_path: "{{ playbook_dir }}/../../dist/ora-tui_1.10.0-1_amd64.deb"
 
   tasks:
     - name: Comprobar si existe el paquete RPM compilado localmente en el nodo de control
@@ -47,7 +47,7 @@
     - name: Copiar paquete RPM local al servidor Oracle (RHEL / Oracle Linux / Rocky)
       ansible.builtin.copy:
         src: "{{ local_rpm_path }}"
-        dest: /tmp/ora-tui-1.8.0-1.x86_64.rpm
+        dest: /tmp/ora-tui-1.10.0-1.x86_64.rpm
         mode: "0644"
       when:
         - ansible_os_family == "RedHat"
@@ -56,7 +56,7 @@
     - name: Descargar paquete RPM desde GitHub si no existe localmente
       ansible.builtin.get_url:
         url: "{{ oratui_rpm_url }}?t={{ ansible_date_time.epoch }}"
-        dest: /tmp/ora-tui-1.8.0-1.x86_64.rpm
+        dest: /tmp/ora-tui-1.10.0-1.x86_64.rpm
         mode: "0644"
         force: true
       when:
@@ -65,7 +65,7 @@
 
     - name: Instalar / Actualizar paquete RPM de ora-tui (RHEL / Oracle Linux)
       ansible.builtin.command: >
-        rpm -Uvh --replacepkgs --force /tmp/ora-tui-1.8.0-1.x86_64.rpm
+        rpm -Uvh --replacepkgs --force /tmp/ora-tui-1.10.0-1.x86_64.rpm
       register: rpm_install
       changed_when: "'ora-tui' in rpm_install.stdout"
       when: ansible_os_family == "RedHat"
@@ -73,7 +73,7 @@
     - name: Copiar paquete DEB local al servidor Oracle (Debian / Ubuntu)
       ansible.builtin.copy:
         src: "{{ local_deb_path }}"
-        dest: /tmp/ora-tui_1.8.0-1_amd64.deb
+        dest: /tmp/ora-tui_1.10.0-1_amd64.deb
         mode: "0644"
       when:
         - ansible_os_family == "Debian"
@@ -82,7 +82,7 @@
     - name: Descargar paquete DEB desde GitHub si no existe localmente
       ansible.builtin.get_url:
         url: "{{ oratui_deb_url }}?t={{ ansible_date_time.epoch }}"
-        dest: /tmp/ora-tui_1.8.0-1_amd64.deb
+        dest: /tmp/ora-tui_1.10.0-1_amd64.deb
         mode: "0644"
         force: true
       when:
@@ -91,11 +91,11 @@
 
     - name: Instalar / Actualizar paquete DEB de ora-tui (Debian / Ubuntu)
       ansible.builtin.apt:
-        deb: /tmp/ora-tui_1.8.0-1_amd64.deb
+        deb: /tmp/ora-tui_1.10.0-1_amd64.deb
         state: present
       when: ansible_os_family == "Debian"
 
-    - name: Configurar unidad systemd /etc/systemd/system/ora-tui-otel.service con credenciales sincronizadas
+    - name: Configurar unidad systemd /etc/systemd/system/ora-tui-otel.service con credenciales sincronizadas y límites Cgroup
       ansible.builtin.copy:
         dest: /etc/systemd/system/ora-tui-otel.service
         owner: root
@@ -114,9 +114,17 @@
           Group=root
           Environment="ORA_TUI_PORT={{ node_otel_port }}"
           Environment="ORA_TUI_INTERVAL={{ node_interval }}"
+          Environment="GOGC=50"
+          Environment="GOMEMLIMIT=48MiB"
           Environment="FLUTTER_WEB_USER={{ flutter_web_user | default('admin') }}"
           Environment="FLUTTER_WEB_PASSWORD={{ flutter_web_password | default('admin') }}"
           Environment="ORATUI_API_TOKEN={{ oratui_api_token | default('') }}"
+          Nice=10
+          CPUQuota=15%
+          MemoryAccounting=true
+          MemoryHigh=48M
+          MemoryMax=96M
+          TasksMax=64
           ExecStart=/bin/sh -c 'exec /usr/bin/ora-tui --opentelemetry --daemon --otel-port=${ORA_TUI_PORT} --interval=${ORA_TUI_INTERVAL}'
           Restart=always
           RestartSec=10

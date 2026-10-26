@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mario/ora-tui/internal/executor"
@@ -107,6 +108,29 @@ tmpfs                     8388608    120 8388488    1% /dev/shm
 	mounts := ParseDFOutput(dfBlocks, dfInodes)
 	if len(mounts) != 2 || mounts[0].MountPoint != "/u01" || mounts[0].InodeUsedPct != 19 {
 		t.Fatalf("unexpected df parse result: %+v", mounts)
+	}
+}
+
+func TestParseBatchSQLOutput(t *testing.T) {
+	batchStream := `
+===ORATUI_SECTION:instances===
+1|PRODCDB1|PRODCDB|PRODCDB_SITE1|ora-rac01|19.24.0.0.0|OPEN|READ WRITE|PRIMARY|ARCHIVELOG|YES|42d 14h|32768|8192|48
+===ORATUI_SECTION:pdbs===
+3|ERP_PDB|READ WRITE|NO|420.5|1,2
+===ORATUI_SECTION:dg_stats===
+ORA-01219: database or pluggable database not open
+transport lag|0 seconds
+apply lag|0 seconds
+`
+	res := executor.ParseBatchSQLOutput(strings.NewReader(batchStream))
+	if len(res["instances"]) != 1 || res["instances"][0][1] != "PRODCDB1" {
+		t.Fatalf("expected 1 instance row in batch, got: %+v", res["instances"])
+	}
+	if len(res["pdbs"]) != 1 || res["pdbs"][0][1] != "ERP_PDB" {
+		t.Fatalf("expected 1 pdb row in batch, got: %+v", res["pdbs"])
+	}
+	if len(res["dg_stats"]) != 2 || res["dg_stats"][0][0] != "transport lag" {
+		t.Fatalf("expected 2 dg_stats rows (with ORA- error skipped), got: %+v", res["dg_stats"])
 	}
 }
 

@@ -1,7 +1,7 @@
 # `ora-tui` — Oracle Cluster (RAC / Restart), Single Instance, Server/SAN & OpenTelemetry Manager
 
 ![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)
-![Version](https://img.shields.io/badge/Version-1.9.0-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.10.0-brightgreen)
 ![Platform](https://img.shields.io/badge/Platform-RHEL%20%7C%20Oracle%20Linux%207%2F8%2F9%20%7C%20Debian%2FUbuntu%20%7C%20macOS%20(Mock)-red)
 ![Dependencies](https://img.shields.io/badge/CGO_ENABLED-0%20(Zero%20Deps)-success)
 ![Telemetry](https://img.shields.io/badge/OpenTelemetry%20%26%20Prometheus-Port%209161-orange)
@@ -21,7 +21,7 @@ Permite analizar y operar en tiempo real entornos **Oracle RAC**, **Oracle Resta
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
-║                    ══ NORTON COMMANDER ORA-TUI v1.9.0 :: ORACLE CLUSTER, DB & SERVER MANAGER ══                      ║
+║                    ══ NORTON COMMANDER ORA-TUI v1.10.0 :: ORACLE CLUSTER, DB & SERVER MANAGER ══                      ║
 ╠══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣
 ║ Modo: [ORACLE RAC] │ Host: ora-rac01.corp.local │ Cluster: crs-prod-cluster │ Ver: 19.24.0.0.0 │ Tema: NORTON        ║
 ║ HOME: /u01/app/oracle/product/19.0.0/dbhome_1 (oracle) │ 2 Inst OPEN │ 4 PDBs │ 4 Sesiones (1 Locks) │ 1 Errores ORA-║
@@ -180,21 +180,21 @@ Al hacer **clic con el ratón** o navegar con las **Flechas (`↑`/`↓`) + `Ent
 #### Instalar por primera vez con `dnf`
 * **Directamente desde GitHub:**
   ```bash
-  sudo dnf install -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.9.0-1.x86_64.rpm
+  sudo dnf install -y https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.10.0-1.x86_64.rpm
   ```
 * **Desde un archivo archivo `.rpm` descargado localmente (o copiado por `scp`):**
   ```bash
-  sudo dnf install -y ./ora-tui-1.9.0-1.x86_64.rpm
+  sudo dnf install -y ./ora-tui-1.10.0-1.x86_64.rpm
   ```
 
 #### Reinstalar / Actualizar a la última compilación con `dnf`
 Para actualizar o reinstalar saltándose tanto la caché local de `dnf` como la caché CDN de 5 minutos de GitHub (`raw.githubusercontent.com`):
 ```bash
 sudo dnf clean all
-curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.9.0-1.x86_64.rpm?t=$(date +%s)"
+curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.10.0-1.x86_64.rpm?t=$(date +%s)"
 sudo dnf install -y /tmp/ora-tui.rpm || sudo dnf reinstall -y /tmp/ora-tui.rpm
 ```
-*(O si ya tienes el archivo en local: `sudo dnf reinstall -y ./ora-tui-1.9.0-1.x86_64.rpm`)*
+*(O si ya tienes el archivo en local: `sudo dnf reinstall -y ./ora-tui-1.10.0-1.x86_64.rpm`)*
 
 ---
 
@@ -203,34 +203,34 @@ sudo dnf install -y /tmp/ora-tui.rpm || sudo dnf reinstall -y /tmp/ora-tui.rpm
 #### Instalar por primera vez con `rpm`
 * **Directamente desde GitHub:**
   ```bash
-  sudo rpm -ivh https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.9.0-1.x86_64.rpm
+  sudo rpm -ivh https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.10.0-1.x86_64.rpm
   ```
 * **Desde un archivo local:**
   ```bash
-  sudo rpm -ivh ./ora-tui-1.9.0-1.x86_64.rpm
+  sudo rpm -ivh ./ora-tui-1.10.0-1.x86_64.rpm
   ```
 
 #### Reinstalar / Forzar actualización con `rpm`
 Para reinstalar o actualizar encima de cualquier versión previa forzando la sustitución del binario (`/usr/bin/ora-tui`) y evitando la caché CDN de GitHub:
 * **Directamente desde GitHub (sin caché):**
   ```bash
-  curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.9.0-1.x86_64.rpm?t=$(date +%s)"
+  curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.rpm "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui-1.10.0-1.x86_64.rpm?t=$(date +%s)"
   sudo rpm -Uvh --replacepkgs --force /tmp/ora-tui.rpm
   ```
 * **Desde un archivo local:**
   ```bash
-  sudo rpm -Uvh --replacepkgs --force ./ora-tui-1.9.0-1.x86_64.rpm
+  sudo rpm -Uvh --replacepkgs --force ./ora-tui-1.10.0-1.x86_64.rpm
   ```
 
 ---
 
 ### 3. Usando `apt-get` / `apt` (Debian / Ubuntu)
 
-El repositorio incluye también el paquete Debian/Ubuntu precompilado en `dist/ora-tui_1.9.0-1_amd64.deb`.
+El repositorio incluye también el paquete Debian/Ubuntu precompilado en `dist/ora-tui_1.10.0-1_amd64.deb`.
 
 #### Instalar por primera vez con `apt-get`
 ```bash
-curl -fL -o /tmp/ora-tui.deb https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.9.0-1_amd64.deb
+curl -fL -o /tmp/ora-tui.deb https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.10.0-1_amd64.deb
 sudo apt-get install -y /tmp/ora-tui.deb
 ```
 *(También puedes usar `sudo dpkg -i /tmp/ora-tui.deb`)*
@@ -238,7 +238,7 @@ sudo apt-get install -y /tmp/ora-tui.deb
 #### Reinstalar / Actualizar a la última compilación con `apt-get`
 Para volver a descargar el paquete `.deb` actualizado desde GitHub sin caché CDN y forzar su reinstalación con `apt-get`:
 ```bash
-curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.deb "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.9.0-1_amd64.deb?t=$(date +%s)"
+curl -fL -H "Cache-Control: no-cache" -o /tmp/ora-tui.deb "https://github.com/mario-ezquerro/oratui/raw/main/dist/ora-tui_1.10.0-1_amd64.deb?t=$(date +%s)"
 sudo apt-get install --reinstall -y /tmp/ora-tui.deb
 ```
 *(O bien con `dpkg`: `sudo dpkg -i --force-overwrite /tmp/ora-tui.deb`)*

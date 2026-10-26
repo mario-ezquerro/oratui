@@ -161,22 +161,28 @@ func ParseSrvctlServiceStatus(dbName, raw string) []model.RACService {
 	return svcs
 }
 
-// CollectDatabase queries SQL*Plus and srvctl for database, PDB, service, and Data Guard metrics.
+// CollectDatabase queries SQL*Plus and srvctl for database, PDB, service, and Data Guard metrics
+// using a single batched SQL*Plus connection to minimize OS process forks and PGA memory.
 func CollectDatabase(ctx context.Context, runner *executor.Runner, env *discovery.DiscoveredEnvironment, sid string) ([]model.InstanceInfo, []model.PDBInfo, []model.RACService, []model.DataGuardStandby) {
 	if env.OracleHome == "" || sid == "" {
 		return nil, nil, nil, nil
 	}
 
-	rows, _, err := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlInstancesQuery, nil)
-	if err != nil {
+	batchRes, err := runner.RunSQLPlusBatch(ctx, env.OracleHome, sid, env.OracleOwner, []executor.BatchSQLQuery{
+		{Key: "instances", SQL: sqlInstancesQuery},
+		{Key: "pdbs", SQL: sqlPDBsQuery},
+		{Key: "dg_stats", SQL: sqlDataGuardStatsQuery},
+	})
+	if err != nil && len(batchRes) == 0 {
 		return nil, nil, nil, nil
 	}
-	instances := ParseInstanceRows(rows)
 
-	pdbRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlPDBsQuery, nil)
-	pdbs := ParsePDBRows(pdbRows)
-
-	dgRows, _, _ := runner.RunSQLPlus(ctx, env.OracleHome, sid, env.OracleOwner, sqlDataGuardStatsQuery, nil)
+	instances := ParseInstanceRows(batchRes["instances"])
+	if len(instances) == 0 {
+		return nil, nil, nil, nil
+	}
+	pdbs := ParsePDBRows(batchRes["pdbs"])
+	dgRows := batchRes["dg_stats"]
 	transportLag := "0 seconds"
 	applyLag := "0 seconds"
 	for _, r := range dgRows {
