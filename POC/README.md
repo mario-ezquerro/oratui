@@ -1,4 +1,4 @@
-# 🚀 POC Multi-Servidor de Observabilidad y Operación Activa Oracle & Linux (`ora-tui v1.8.0` + Flutter Web Command & SRE Center + Prometheus + Grafana + Ansible + Jenkins)
+# 🚀 POC Multi-Servidor de Observabilidad y Operación Activa Oracle & Linux (`ora-tui v1.9.0` + Flutter Web Command & SRE Center + Prometheus + Grafana + Ansible + Jenkins)
 
 Esta carpeta **`POC/`** proporciona una arquitectura integral de **Observabilidad, Ingeniería de Fiabilidad (SRE/SLO), Seguridad Sincronizada y Operación Remota Activa** para **1 o 100 servidores Oracle**:
 
