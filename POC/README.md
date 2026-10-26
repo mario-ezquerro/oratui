@@ -16,8 +16,16 @@ Esta carpeta **`POC/`** proporciona una arquitectura integral de **Observabilida
      * Calcula en tiempo real **4 SLOs clave** (*Disponibilidad BD & Clusterware 99.95%*, *Operación Libre de Bloqueos TX/TM 99.50%*, *Salud de Capacidad 99.90%* y *Redundancia SAN Multipath 99.99%*), su **SLI actual (%)**, el **Error Budget restante (%)** y la velocidad de consumo (**Burn Rate**).
      * Detecta **Alarmas Delicadas** y ofrece un botón de **remediación en 1 clic** junto a cada alarma.
      * Permite configurar desde la propia web el envío automático o manual de avisos críticos a **Telegram Bot API (`api.telegram.org`)** y **Correo Electrónico SMTP (`STARTTLS` / `AUTH PLAIN`)**, guardando las credenciales con permisos `0600` en `/etc/ora-tui-sre.json` y devolviéndolas enmascaradas (`********`).
+   * **Pestaña 7 (`DIAGNÓSTICO AVANZADO & ADVISOR`) + Informe Ejecutivo HTML/PDF (`/api/v1/report`)**:
+     * Motor de Recomendaciones Automatizado (**Advisor Engine**), detección de **SQL Plan Flips (`gv$sql`)** con botón para **fijar el mejor plan en SQL Plan Baseline (`DBMS_SPM`)**, progreso en tiempo real de **canales RMAN activos (`gv$session_longops`, `%`, `MB/s`, `ETA`)**, monitorización y relanzado en 1 clic de **Scheduler Jobs de negocio (`dba_scheduler_jobs`)**, latencia de **RAC Cache Fusion (`gc cr/current block receive time`)**, latencia I/O por Datafile (`v$filestat`), salud de **Redo Log Switches/hora & Undo (`ORA-01555`)**, curvas de **Memory Advisor (`SGA`/`PGA`)**, **Wait Chains (`v$wait_chains`)** y degradación de **Parallel Query DOP (`gv$px_session`)**.
+     * Botón **`INFORME HTML/PDF`** en la cabecera superior que abre `/api/v1/report` con un informe ejecutivo completo listo para imprimir o guardar en PDF.
 
-2. **🔐 Arquitectura de Seguridad entre Flutter Web (`:8088`) y el Servidor Oracle (`:9161`)**:
+2. **⚡ Arquitectura Daemon Ultra-Ligera (`v1.10.0` — Mínima Memoria RAM y CPU en Servidores Oracle)**:
+   * **Conexiones `sqlplus` Agrupadas (`RunSQLPlusBatch`)**: Todas las consultas SQL de cada ciclo se ejecutan en una única sesión `sqlplus -s / as sysdba` con parseo en streaming (`bufio.Scanner`), reduciendo en más de un 90% la creación de procesos sombra en Oracle.
+   * **Caché Multicapa (`10s` / `30s` / `60s` / `10m` / `sync.Once`) y Lectura Condicional de `alert_<SID>.log`**: Las vistas pesadas del diccionario (`dba_segments`, `dba_objects`, `dba_data_files`, `dba_scheduler_jobs`) se cachean entre 30s y 60s, `/proc/cpuinfo` se lee una sola vez al arrancar y `alert_<SID>.log` verifica primero `os.Stat` (`size` + `mtime`) para no hacer I/O ni reservar RAM si el fichero no ha cambiado.
+   * **Límite de Memoria en Go (`GOMEMLIMIT=48MiB`, `GOGC=50`) y Cgroups en `systemd`**: Tanto `packaging/ora-tui-otel.service` como `POC/ansible/site.yml` configuran `MemoryHigh=48M`, `MemoryMax=96M`, `CPUQuota=15%`, `TasksMax=64` y `Nice=10`.
+
+3. **🔐 Arquitectura de Seguridad entre Flutter Web (`:8088`) y el Servidor Oracle (`:9161`)**:
    * **Lista Blanca Cerrada (`Action Whitelist`)**: El navegador nunca envía comandos SQL ni Bash arbitrarios; solo envía un identificador cerrado (`action: "switch_logfile"`) que el binario Go traduce internamente.
    * **Filtro Estricto Anti-Inyección (`validateSafeTarget`)**: El parámetro `target` se valida contra la expresión regular `^[a-zA-Z0-9_.,@#$+-]{0,96}$`, bloqueando con `HTTP 400` cualquier intento de inyección (`;`, `--`, `DROP`, `UNION`, `` ` ``, `$`).
    * **Autenticación Sincronizada (`HTTP Basic Auth` + `X-OraTui-Token`)**:

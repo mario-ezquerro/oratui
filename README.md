@@ -10,10 +10,11 @@
 **`ora-tui`** es una herramienta interactiva de consola (**Terminal User Interface - TUI**) y **Exportador OpenTelemetry / Prometheus embebido** escrita en **Go** y compilada como un único binario estático sin dependencias externas (`CGO_ENABLED=0`).
 
 Permite analizar y operar en tiempo real entornos **Oracle RAC**, **Oracle Restart**, **Oracle Single Instance** y la **salud del servidor Linux y almacenamiento SAN/Multipath**:
-* **9 Módulos Interactivos de Análisis y Mantenimiento**: Clusterware/Instancias/PDBs, Sesiones/Bloqueos TX-TM, Tablespaces/Datafiles (`AUTOEXTEND`), Segmentos/Objetos Inválidos, ASM/Listeners, Backups RMAN/Flashback/Data Guard, Alert Log (`ORA-`), **Servidor Linux/Discos/SAN Multipath (`multipath -ll`, HBA FC, Inodos `df -i`, HugePages/THP)** y Centro de Mantenimiento.
+* **10 Módulos Interactivos de Análisis, Diagnóstico Avanzado y Mantenimiento (`1`..`9` + `0`)**: Clusterware/Instancias/PDBs, Sesiones/Bloqueos TX-TM, Tablespaces/Datafiles (`AUTOEXTEND`), Segmentos/Objetos Inválidos, ASM/Listeners, Backups RMAN/Flashback/Data Guard, Alert Log (`ORA-`), **Servidor Linux/Discos/SAN Multipath (`multipath -ll`, HBA FC, Inodos `df -i`, HugePages/THP)**, Centro de Mantenimiento y **`0. Diagnóstico Avanzado & Advisor`** (*SQL Plan Flips* + *SPM Baselines*, canales RMAN en vivo, *Scheduler Jobs* de negocio, *RAC Cache Fusion*, latencia I/O por Datafile, Redo/Undo `ORA-01555`, *Memory Advisor*, *Wait Chains* y degradación *Parallel Query DOP*).
+* **Arquitectura Daemon Ultra-Ligera (`v1.10.0` — `GOMEMLIMIT=48MiB` + SQL Agrupado + Cgroups)**: Ejecuta todas las consultas en sesiones `sqlplus` agrupadas ([`RunSQLPlusBatch`](file:///Users/mario/repositorios/oratui/internal/executor/runner.go#L183-L246)) con parseo en streaming (`bufio.Scanner`), caché multicapa (`10s` / `30s` / `60s` / `10m`), lectura condicional de `alert_<SID>.log` sin I/O cuando no cambia (`os.Stat`) y límites de memoria en Go y `systemd` (`MemoryHigh=48M`, `MemoryMax=96M`, `CPUQuota=15%`).
 * **Ventana Emergente de Resultados de Operaciones**: Toda operación, diagnóstico o comando ejecutado muestra una ventana modal emergente desplazable (`↑`/`↓`/`PgUp`/`PgDn`) con la salida completa en tiempo real (`multipath -ll`, `lsblk`, `sysctl`, `df -Phi`, `du -shx`, `sqlplus`, `rman`, `lsnrctl`, `crsctl`, `srvctl`, `adrci`).
 * **4 Temas de Color Retro MS-DOS conmutables en vivo (`c`)**: *Norton Commander 5.0*, *Borland Turbo C++ 3.0*, *Monitor CRT de Fósforo Verde (IBM 5151 P1)* y *Terminal Oscuro*.
-* **Exportador OpenTelemetry (`OTLP JSON`) y Prometheus (`/metrics`) integrado (`--opentelemetry` / `--daemon`)**: Expone las **52 métricas** del servidor y base de datos en el puerto `9161` (configurable con `--otel-port`), e incluye una carpeta **[`POC/`](file:///Users/mario/repositorios/oratui/POC)** lista para levantar en cualquier servidor con Docker un stack completo de **Prometheus + Alertas + Grafana (26 paneles autoprovisionados)** ejecutando un único script interactivo (`./configure-poc.sh`).
+* **Exportador OpenTelemetry (`OTLP JSON`), Prometheus (`/metrics`), SRE/SLO (`/api/v1/sre`), Informe Ejecutivo HTML/PDF (`/api/v1/report`) y Centro de Mando Flutter Web (`:8088`)**: Expone **70+ métricas** en el puerto `9161`, e incluye en **[`POC/`](file:///Users/mario/repositorios/oratui/POC)** el stack completo Docker + Ansible + Jenkins con **Flutter Web Command & SRE Center (`:8088`)**, **Prometheus (`:9090`)** y **Grafana Multi-Servidor (`:3000`)**.
 
 ---
 
@@ -82,8 +83,19 @@ En servidores Oracle de producción, las herramientas de Grid Infrastructure per
 * Cuando ejecuta consultas SQL (`sqlplus -s / as sysdba`), `srvctl`, `lsnrctl`, `rman` o `adrci`, cambia dinámicamente el contexto del proceso hijo (`syscall.Credential` / `sudo -n -u`) al usuario propietario (`oracle` o `grid`).
 * Reserva la ejecución como `root` **exclusivamente** para el arranque o parada de la pila de clusterware (`crsctl start/stop crs`) o reescaneo de buses SCSI/Multipath.
 
-### 3. Colectores Asíncronos No Bloqueantes (`internal/collector`)
-Un coordinador en segundo plano actualiza las métricas cada 10 segundos (configurable con `--interval`) usando consultas delimitadas por tuberías (`COLSEP '|'`) e inspecciones nativas de `/proc` y `/sys` sin bloquear la interfaz ni requerir librerías C de Oracle Instant Client (`libclntsh.so`).
+### 3. Colectores Asíncronos de Ultra-Bajo Consumo y SQL Agrupado (`internal/collector` & `internal/executor`)
+Para garantizar que el daemon `ora-tui` ocupe el mínimo absoluto de memoria RAM (**~15–30 MB RSS**) y no sature la CPU ni fuerce decenas de procesos sombra en Oracle aunque lleve meses en ejecución:
+1. **Agrupación de Consultas en Sesión Única (`RunSQLPlusBatch`)**: En lugar de abrir un subproceso `sqlplus` por cada vista, [`RunSQLPlusBatch`](file:///Users/mario/repositorios/oratui/internal/executor/runner.go#L183-L246) agrupa múltiples consultas SQL dentro de **una única conexión `sqlplus -s / as sysdba`** separada por marcadores `PROMPT ===ORATUI_SECTION:<clave>===` y `WHENEVER SQLERROR CONTINUE`, procesando la salida en streaming con `bufio.Scanner` sin reservar megabytes de cadenas intermedias.
+2. **Caché Multicapa por Criticidad (Tiered Caching)**:
+   * **Tier 1 (Tiempo Real — cada 10s)**: Instancias, Sesiones/Bloqueos TX-TM, Canales RMAN activos (`gv$session_longops`), *RAC Cache Fusion*, Redo/Undo, *Wait Chains* (`v$wait_chains`), *Parallel Query DOP* y `/proc/loadavg` + `/proc/meminfo`.
+   * **Tier 2 ( Frecuencia Media — cada 30s)**: Capacidad de Tablespaces/ASM, *SQL Plan Flips* (`gv$sql`), Latencia I/O por Datafile (`v$filestat`), *Memory Advisor* (`v$sga_target_advice` / `v$pga_target_advice`), Listeners (`lsnrctl`), Filesystems/Inodos (`df`) y caminos SAN (`multipath -ll`).
+   * **Tier 3 (Diccionario Pesado — cada 60s)**: Top 50 Segmentos (`dba_segments`), Objetos Inválidos (`dba_objects`), Datafiles (`dba_data_files`), Jobs de Negocio (`dba_scheduler_jobs`), Historial RMAN (`v$rman_backup_job_details`) y descubrimiento de procesos `/proc`.
+   * **Metadatos Estáticos (`sync.Once` / 10m)**: Modelo/núcleos de CPU (`/proc/cpuinfo`), versión de kernel, ruta `Diag Trace` (`v$diag_info`) y versión de Oracle (`sqlplus -V` / `crsctl`) se cachean para no repetir subprocesos innecesarios.
+3. **Lectura Condicional Zero-Copy de `alert_<SID>.log`**: [`ReadTailAlertLogFile`](file:///Users/mario/repositorios/oratui/internal/collector/rman_diag.go#L136-L237) comprueba primero `os.Stat` (`Size` y `ModTime`). Si el fichero `alert_<SID>.log` no ha crecido ni cambiado desde el ciclo anterior, **no abre el fichero ni reserva un solo byte en memoria**; cuando cambia, lee únicamente los últimos `128 KB` mediante `bufio.Scanner` sobre un ring-buffer fijo de 15 líneas.
+4. **Ring-Buffers Pre-asignados y Límite de Memoria (`GOMEMLIMIT=48MiB` + Cgroups)**:
+   * El historial temporal de telemetría (`90` muestras) rota in-place con `copy()` sin reasignar arrays, y el mapa de *cooldown* de alertas (`alertLastSent`) poda automáticamente las entradas caducadas en cada ciclo.
+   * En modo `--daemon`, `ora-tui` configura automáticamente `debug.SetGCPercent(50)`, `debug.SetMemoryLimit(48 * 1024 * 1024)` (**48 MiB**) y libera páginas físicas al kernel con `debug.FreeOSMemory()`.
+   * La unidad `systemd` ([`packaging/ora-tui-otel.service`](file:///Users/mario/repositorios/oratui/packaging/ora-tui-otel.service)) aplica además control Cgroup v2 (`MemoryHigh=48M`, `MemoryMax=96M`, `CPUQuota=15%`, `TasksMax=64`, `Nice=10`).
 
 ### 4. Ventana Emergente de Resultados de Operaciones (`Operation Output Modal`)
 Cada vez que ejecutas una acción desde cualquier submenú (como auditar `multipath -ll`, inspeccionar `lsblk`, `sysctl`, `df -Phi`, `du -shx`, `lsnrctl status`, planes `DBMS_XPLAN`, backups RMAN o comandos `srvctl`/`crsctl`), `ora-tui`:
@@ -102,7 +114,7 @@ Además, pulsando la tecla **`b`** puedes alternar los marcos de las ventanas en
 
 ---
 
-## Los 9 Módulos de Análisis y Mantenimiento
+## Los 10 Módulos de Análisis, Diagnóstico Avanzado y Mantenimiento (`1`..`9` + `0`)
 
 Al hacer **clic con el ratón** o navegar con las **Flechas (`↑`/`↓`) + `Enter`** sobre cualquier fila de una tabla, se abre una ventana emergente con las operaciones de mantenimiento contextuales para ese recurso:
 
@@ -122,7 +134,7 @@ Al hacer **clic con el ratón** o navegar con las **Flechas (`↑`/`↓`) + `Ent
    * Estado y redundancia de diskgroups ASM (`USABLE_FILE_MB`, `OFFLINE_DISKS`) y Listeners locales/SCAN con distinción entre servicios **`READY`** (LREG/PMON dinámico) y **`UNKNOWN`** (`listener.ora` estático).
    * **Mantenimiento:** `lsnrctl start`, `stop`, `reload`, reinicio completo y `ALTER SYSTEM REGISTER`.
 6. **RMAN, Flashback & Data Guard:**
-   * Historial de backups (`v$rman_backup_job_details`), puntos de restauración garantizados (`v$restore_point`) y estado de sincronización de Data Guard Standby (`MRP0`, `Transport/Apply Lag`).
+   * Historial de backups (`v$rman_backup_job_details`), **progreso en vivo de canales RMAN activos (`gv$session_longops`, `%` completado, `MB/s` y `ETA`)**, puntos de restauración garantizados (`v$restore_point`) y estado de sincronización de Data Guard Standby (`MRP0`, `Transport/Apply Lag`).
    * **Mantenimiento:** Lanzar backup de Archivelogs o Incremental Nivel 1, `CROSSCHECK`, y crear *Guaranteed Restore Points (GRP)*.
 7. **Alert Log & Errores `ORA-` (`alert_<SID>.log`):**
    * Tabla estricta de errores `^ORA-` (ignorando falsos positivos de parches OPatch), herramientas de diagnóstico ADR (`oerr`, `adrci purge`, `SWITCH LOGFILE`, `CHECKPOINT` y rotación del `alert.log`) y visor *tail* en vivo.
@@ -133,6 +145,10 @@ Al hacer **clic con el ratón** o navegar con las **Flechas (`↑`/`↓`) + `Ent
    * **Mantenimiento de Servidor:** Auditoría `sysctl`, Top procesos por CPU/RAM, liberación segura de `PageCache` (`vm.drop_caches=3`), análisis `du -shx` por punto de montaje, auditoría completa `multipath -ll` + `lsblk`, y **reescaneo en caliente de buses SCSI/FC y Multipath (`scsi_host scan` + `multipath -r`)**.
 9. **Centro de Mantenimiento:**
    * Catálogo centralizado con todos los asistentes guiados paso a paso.
+0. **Diagnóstico Avanzado & Advisor (`0` en el menú TUI / Pestaña 7 en Flutter Web):**
+   * **Panel `[1/3]` (Advisor Engine & SQL Plan Flips):** Motor de reglas DBA/SRE que evalúa regresiones de planes SQL (`gv$sql`, comparando el `PLAN_HASH_VALUE` actual frente al mejor histórico), permitiendo **fijar el mejor plan en SQL Plan Baseline (`DBMS_SPM.LOAD_PLANS_FROM_CURSOR_CACHE`)** o inspeccionar `DBMS_XPLAN.DISPLAY_CURSOR`.
+   * **Panel `[2/3]` (Jobs de Negocio `DBMS_SCHEDULER` & Canales RMAN en Vivo):** Estado y fallos en las últimas 24h de `dba_scheduler_jobs` / `dba_jobs` (con opción de **relanzar el job inmediatamente** con `DBMS_SCHEDULER.RUN_JOB`) y progreso en tiempo real de canales RMAN (`%`, `MB/s`, `ETA`).
+   * **Panel `[3/3]` (RAC Cache Fusion, Latencia I/O Datafiles, Redo/Undo & Memory Advisor):** Latencia en milisegundos de bloques *Global Cache CR / Current* en el Interconnect privado RAC (`gv$sysstat`), latencia de lectura/escritura por datafile (`v$filestat`), tasa de *Redo Log Switches/hora* y errores `ORA-01555` (`v$undostat`), curvas de `v$sga_target_advice` / `v$pga_target_advice`, cadenas de bloqueo multi-salto (`v$wait_chains`) y degradación de paralelismo (`gv$px_session`).
 
 ---
 
@@ -144,7 +160,7 @@ Al hacer **clic con el ratón** o navegar con las **Flechas (`↑`/`↓`) + `Ent
 | **`↑` / `↓` / `←` / `→`** | Moverse por el menú lateral, paneles de ventanas (`←`/`→`), filas de tablas (`↑`/`↓`), opciones de submenús y desplazamiento en ventanas de resultados |
 | **`Enter`** | Abrir ventana emergente de mantenimiento para el elemento seleccionado / Confirmar / Cerrar ventana de resultado |
 | **`Tab` / `Shift+Tab`** | Alternar el foco entre el menú lateral izquierdo y las sub-ventanas del módulo activo |
-| **`1` .. `9`** | Saltar directamente a cualquiera de los 9 módulos (`8` = Servidor, Discos & SAN, `9` = Centro Mantenimiento) |
+| **`1` .. `9`, `0`** | Saltar directamente a cualquiera de los 10 módulos (`8` = Servidor, Discos & SAN, `9` = Centro Mantenimiento, `0` = Diagnóstico Avanzado & Advisor) |
 | **`F1` / `h`** | **Activar / Desactivar la ayuda en los menús** (compacta el menú lateral y los submenús emergentes) |
 | **`c`** | **Cambiar tema de color retro en vivo**: *Norton Commander* $\rightarrow$ *Borland Turbo C++ 3.0* $\rightarrow$ *Fósforo Verde (IBM 5151 CRT)* $\rightarrow$ *Terminal Oscuro* |
 | **`b`** | Alternar en vivo el estilo de marcos: *Mixto (`┌─┐`/`╔═╗`)* $\rightarrow$ *Doble (`╔═╗`)* $\rightarrow$ *Simple (`┌─┐`)* $\rightarrow$ *ASCII (`+-|`)* |
@@ -273,14 +289,17 @@ Por defecto utiliza el puerto **`9161`** (puerto estándar de monitorización Or
 
 ### 2. Endpoints HTTP expuestos por `ora-tui`
 Una vez iniciado, puedes consultar:
-* **`http://<IP-SERVIDOR>:9161/metrics`** $\rightarrow$ Formato **Prometheus / OpenMetrics** (52 métricas listas para `prometheus.yml` o `otel-collector`).
+* **`http://<IP-SERVIDOR>:9161/metrics`** $\rightarrow$ Formato **Prometheus / OpenMetrics** (**70+ métricas** listas para `prometheus.yml` o `otel-collector`).
 * **`http://<IP-SERVIDOR>:9161/otel/v1/metrics`** $\rightarrow$ Formato **OpenTelemetry OTLP/HTTP JSON (`resourceMetrics`)**.
-* **`http://<IP-SERVIDOR>:9161/api/v1/state`** $\rightarrow$ Snapshot completo del estado en **JSON**.
+* **`http://<IP-SERVIDOR>:9161/api/v1/state`** $\rightarrow$ Snapshot completo del estado, métricas avanzadas, Advisor, historial temporal y SLOs en **JSON**.
+* **`http://<IP-SERVIDOR>:9161/api/v1/report`** $\rightarrow$ **Informe Ejecutivo HTML/PDF** listo para imprimir o guardar como PDF desde el navegador (KPIs, Hallazgos Advisor, SQL Plan Flips, RMAN, Jobs, Cache Fusion, I/O y SAN).
+* **`http://<IP-SERVIDOR>:9161/api/v1/sre`** $\rightarrow$ Estado de **Objetivos SLO, Error Budget, Burn Rate, Alertas Críticas y Canales Telegram / Email SMTP**.
+* **`POST http://<IP-SERVIDOR>:9161/api/v1/action`** $\rightarrow$ **Ejecución remota autenticada (`BasicAuth` / `X-OraTui-Token`)** de operaciones DBA, RMAN, SPM Baselines, Scheduler Jobs y Linux/SAN con lista blanca estricta y filtro anti-inyección.
 * **`http://<IP-SERVIDOR>:9161/healthz`** $\rightarrow$ Healthcheck ligero (`HTTP 200 OK`).
 * **`http://<IP-SERVIDOR>:9161/`** $\rightarrow$ Página web de resumen con enlaces directos a los endpoints.
 
-### 3. Cómo iniciarlo como Servicio Daemon (`systemd`)
-El paquete `.rpm` y `.deb` instala automáticamente el servicio **`/usr/lib/systemd/system/ora-tui-otel.service`** (y una copia en `/usr/share/ora-tui/ora-tui-otel.service`). Para dejarlo activo de forma permanente al arrancar el servidor Linux:
+### 3. Cómo iniciarlo como Servicio Daemon (`systemd`) con Blindaje de Memoria y CPU (`v1.10.0`)
+El paquete `.rpm` y `.deb` instala automáticamente el servicio **`/usr/lib/systemd/system/ora-tui-otel.service`** (y una copia en `/usr/share/ora-tui/ora-tui-otel.service`) configurado con límites estrictos de memoria y CPU (`GOGC=50`, `GOMEMLIMIT=48MiB`, `MemoryHigh=48M`, `MemoryMax=96M`, `CPUQuota=15%`, `TasksMax=64`, `Nice=10`) para garantizar que el daemon jamás sature los recursos del servidor Oracle. Para dejarlo activo de forma permanente:
 
 ```bash
 # Recargar demonios, habilitar en el arranque e iniciar ahora mismo:
@@ -334,6 +353,13 @@ sudo systemctl restart ora-tui-otel
 | `oratui_os_metric_used_percent` / `oratui_os_metric_healthy` | `host`, `cluster`, `category`, `component`, `status`, `current_value` | Salud (`1` = OK, `0` = WARN/CRIT) y % de uso de CPU Load, RAM, Swap, HugePages/THP y Kernel AIO/FD |
 | `oratui_filesystem_used_percent` / `inodes_used_percent` / `total_mb` / `used_mb` / `avail_mb` | `host`, `cluster`, `mountpoint`, `device`, `fstype`, `status` | Uso de espacio e inodos (`df -Pi`, prevención de `ORA-09925`) de todos los filesystems montados |
 | `oratui_storage_path_healthy` | `host`, `cluster`, `name`, `type`, `size`, `wwid_model`, `paths_summary`, `status` | Salud de cada LUN SAN Multipath (`4/4 ACTIVE` = `1`, `DEGRADED/FAULTY` = `0`), puertos HBA FC y discos |
+| `oratui_sql_plan_count` / `oratui_sql_plan_regression` / `oratui_sql_plan_elapsed_ms` | `host`, `cluster`, `sql_id`, `schema`, `current_phv`, `best_phv`, `status` | Detección de *SQL Plan Flips* (`gv$sql`), regresiones (`1` = REGRESSION) y latencia en ms por ejecución |
+| `oratui_rman_channel_progress_pct` / `throughput_mb_s` / `remaining_seconds` | `host`, `cluster`, `sid`, `operation`, `status` | Progreso en vivo (`%`), velocidad (`MB/s`) y `ETA` de cada canal RMAN activo (`gv$session_longops`) |
+| `oratui_scheduler_job_failed_24h` / `oratui_scheduler_job_healthy` | `host`, `cluster`, `owner`, `job_name`, `job_type`, `state` | Salud (`1` = OK, `0` = FAILED/BROKEN) y fallos en las últimas 24h de jobs de negocio (`dba_scheduler_jobs`) |
+| `oratui_rac_gc_cr_block_latency_ms` / `gc_current_block_latency_ms` / `lost_blocks_total` | `host`, `cluster`, `inst_id`, `instance`, `interconnect_ip`, `status` | Latencia en milisegundos de *RAC Cache Fusion* (bloques CR y Current) y bloques perdidos en el Interconnect |
+| `oratui_datafile_read_latency_ms` / `write_latency_ms` / `iops` | `host`, `cluster`, `file_id`, `file_name`, `tablespace`, `status` | Latencia física media de lectura y escritura (ms) e IOPS por datafile (`v$filestat`) |
+| `oratui_redo_switches_last_hour` / `redo_rate_mb_per_sec` / `undo_ora01555_total` | `host`, `cluster` | Cambios de Redo Log en la última hora, tasa de generación Redo (`MB/s`) y errores `ORA-01555` (`v$undostat`) |
+| `oratui_wait_chains_active_total` / `oratui_px_downgraded_queries_total` / `oratui_advisor_findings_total` | `host`, `cluster` | Total de cadenas de bloqueo activas (`v$wait_chains`), consultas paralelas con DOP degradado y hallazgos del Advisor |
 
 ---
 
