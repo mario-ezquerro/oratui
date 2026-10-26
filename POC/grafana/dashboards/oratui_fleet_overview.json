@@ -509,6 +509,133 @@
       ],
       "title": "Salud Global de Caminos SAN Multipath & HBA FC por Servidor",
       "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
+      "id": 103,
+      "panels": [],
+      "title": "4. Diagnóstico Avanzado de Flota (Hallazgos Advisor, Regresiones SQL Plan Flips, Jobs Fallidos & Latencia RAC Cache Fusion)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 32 },
+      "id": 11,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_advisor_findings_total{host=~\"$host\"}",
+          "legendFormat": "[{{host}}] Hallazgos Advisor",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_wait_chains_active_total{host=~\"$host\"}",
+          "legendFormat": "[{{host}}] Wait Chains",
+          "refId": "B"
+        }
+      ],
+      "title": "Hallazgos Advisor & Wait Chains por Servidor",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 150 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 32 },
+      "id": 12,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "topk(10, oratui_sql_plan_elapsed_ms{host=~\"$host\"})",
+          "legendFormat": "[{{host}}] SQL {{sql_id}} ({{status}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Top SQL Plan Flips & Regresiones en la Flota (ms/exec)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 1, "text": "FAILED / BROKEN" },
+                "1": { "color": "green", "index": 0, "text": "OK" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 32 },
+      "id": 13,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_scheduler_job_healthy{host=~\"$host\"} == 0",
+          "legendFormat": "[{{host}}] {{owner}}.{{job_name}} ({{state}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_undo_ora01555_total{host=~\"$host\"} > 0",
+          "legendFormat": "[{{host}}] ORA-01555 Undo",
+          "refId": "B"
+        }
+      ],
+      "title": "Jobs de Negocio Fallidos (DBMS_SCHEDULER) & Errores ORA-01555 en la Flota",
+      "type": "stat"
     }
   ],
   "refresh": "10s",

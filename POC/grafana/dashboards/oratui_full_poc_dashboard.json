@@ -1087,11 +1087,348 @@
       ],
       "title": "Estado de Caminos SAN Multipath, Tarjetas FC HBA, Discos & Chequeos Kernel",
       "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 57 },
+      "id": 104,
+      "panels": [],
+      "title": "5. Diagnóstico Avanzado Oracle (Advisor Engine, SQL Plan Flips, Canales RMAN, Scheduler Jobs, RAC Cache Fusion, Datafile I/O, Redo/Undo & PX)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 58 },
+      "id": 27,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_advisor_findings_total{host=~\"$host\"}",
+          "legendFormat": "Hallazgos Advisor ({{host}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_wait_chains_active_total{host=~\"$host\"}",
+          "legendFormat": "Wait Chains Activas",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_px_downgraded_queries_total{host=~\"$host\"}",
+          "legendFormat": "PX DOP Degradados",
+          "refId": "C"
+        },
+        {
+          "expr": "oratui_undo_ora01555_total{host=~\"$host\"}",
+          "legendFormat": "Errores ORA-01555 (Undo)",
+          "refId": "D"
+        },
+        {
+          "expr": "oratui_redo_switches_last_hour{host=~\"$host\"}",
+          "legendFormat": "Redo Switches (1h)",
+          "refId": "E"
+        }
+      ],
+      "title": "KPIs Diagnóstico Avanzado: Hallazgos Advisor, Wait Chains, PX Downgrades, ORA-01555 & Redo Switches/h",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 58 },
+      "id": 28,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_buffer_cache_hit_percent{host=~\"$host\"}",
+          "legendFormat": "Buffer Cache Hit Ratio % ({{host}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_pga_cache_hit_percent{host=~\"$host\"}",
+          "legendFormat": "PGA Cache Hit % ({{host}})",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_rman_channel_progress_pct{host=~\"$host\"}",
+          "legendFormat": "Canal RMAN SID={{sid}} ({{operation}})",
+          "refId": "C"
+        }
+      ],
+      "title": "Eficiencia de Memoria (Buffer Cache / PGA Hit %) & Progreso en Vivo de Canales RMAN (%)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 150 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 64 },
+      "id": 29,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_sql_plan_elapsed_ms{host=~\"$host\"}",
+          "legendFormat": "SQL_ID {{sql_id}} ({{schema}}) [PHV {{current_phv}} vs Best {{best_phv}}] -> {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "SQL Plan Flips & Regresiones de Plan (gv$sql — Latencia ms/exec por SQL_ID y PHV)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "index": 1, "text": "FAILED / BROKEN" },
+                "1": { "color": "green", "index": 0, "text": "HEALTHY / SUCCEEDED" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 64 },
+      "id": 30,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "oratui_scheduler_job_healthy{host=~\"$host\"}",
+          "legendFormat": "{{owner}}.{{job_name}} ({{state}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_scheduler_job_failed_24h{host=~\"$host\"} > 0",
+          "legendFormat": "Fallos 24h: {{owner}}.{{job_name}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Salud de Jobs de Negocio (DBMS_SCHEDULER / DBMS_JOB) & Fallos en 24h",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 72 },
+      "id": 31,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_rac_gc_cr_block_latency_ms{host=~\"$host\"}",
+          "legendFormat": "GC CR Block Latency ({{instance}} - {{interconnect_ip}})",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_rac_gc_current_block_latency_ms{host=~\"$host\"}",
+          "legendFormat": "GC Current Block Latency ({{instance}} - {{interconnect_ip}})",
+          "refId": "B"
+        }
+      ],
+      "title": "RAC Cache Fusion Interconnect: Latencia Global Cache CR vs Current Block (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 20 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 72 },
+      "id": 32,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_datafile_read_latency_ms{host=~\"$host\"}",
+          "legendFormat": "Read [{{tablespace}}] {{file_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_datafile_write_latency_ms{host=~\"$host\"}",
+          "legendFormat": "Write [{{tablespace}}] {{file_name}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Latencia Física I/O por Datafile (v$filestat — Read ms vs Write ms)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 80 },
+      "id": 33,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_redo_rate_mb_per_sec{host=~\"$host\"}",
+          "legendFormat": "Tasa Redo (MB/s)",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_hard_parses_per_sec{host=~\"$host\"}",
+          "legendFormat": "Hard Parses / seg",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_rman_channel_throughput_mb_s{host=~\"$host\"}",
+          "legendFormat": "Throughput Canal RMAN SID={{sid}} (MB/s)",
+          "refId": "C"
+        }
+      ],
+      "title": "Tasa de Generación Redo (MB/s), Hard Parses/s & Throughput de Canales RMAN (MB/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "unit": "decmbytes"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 80 },
+      "id": 34,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_undo_active_mb{host=~\"$host\"}",
+          "legendFormat": "Undo ACTIVE (MB)",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_undo_unexpired_mb{host=~\"$host\"}",
+          "legendFormat": "Undo UNEXPIRED (MB)",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_undo_expired_mb{host=~\"$host\"}",
+          "legendFormat": "Undo EXPIRED (MB)",
+          "refId": "C"
+        }
+      ],
+      "title": "Distribución de Undo Tablespace (Active / Unexpired / Expired MB — v$undostat)",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["oracle", "rac", "oratui", "opentelemetry", "prometheus", "linux", "san", "multipath", "poc"],
+  "tags": ["oracle", "rac", "oratui", "opentelemetry", "prometheus", "linux", "san", "multipath", "advisor", "poc"],
   "templating": {
     "list": [
       {

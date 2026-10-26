@@ -150,3 +150,73 @@ groups:
         annotations:
           summary: "Camino SAN Multipath o HBA degradado: {{ $labels.name }} en {{ $labels.host }}"
           description: "El dispositivo {{ $labels.name }} ({{ $labels.type }}) presenta caminos caídos: {{ $labels.paths_summary }}."
+
+      # 15. Regresión de Plan SQL (SQL Plan Flip detectado en gv$sql)
+      - alert: OracleSQLPlanFlipRegression
+        expr: oratui_sql_plan_regression > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Regresión de Plan SQL (Plan Flip) en SQL_ID {{ $labels.sql_id }} ({{ $labels.host }})"
+          description: "El SQL_ID {{ $labels.sql_id }} (esquema {{ $labels.schema }}) usa el PHV {{ $labels.current_phv }} en vez del óptimo {{ $labels.best_phv }}. Fije el plan en SQL Plan Baseline (DBMS_SPM)."
+
+      # 16. Job de Negocio Fallido en las últimas 24h (DBMS_SCHEDULER / DBMS_JOB)
+      - alert: OracleBusinessSchedulerJobFailed
+        expr: oratui_scheduler_job_failed_24h > 0 or oratui_scheduler_job_healthy == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Job de negocio {{ $labels.owner }}.{{ $labels.job_name }} en estado {{ $labels.state }} ({{ $labels.host }})"
+          description: "El job {{ $labels.owner }}.{{ $labels.job_name }} ({{ $labels.job_type }}) registra fallos en las últimas 24h."
+
+      # 17. Latencia Elevada en RAC Cache Fusion Interconnect (> 2.5 ms)
+      - alert: OracleRACCacheFusionHighLatency
+        expr: oratui_rac_gc_cr_block_latency_ms > 2.5 or oratui_rac_gc_current_block_latency_ms > 2.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alta latencia RAC Cache Fusion en instancia {{ $labels.instance }} ({{ $labels.host }})"
+          description: "La transferencia de bloques Global Cache por el Interconnect ({{ $labels.interconnect_ip }}) supera 2.5 ms ({{ $value }} ms)."
+
+      # 18. Latencia I/O Elevada en Datafile (> 15 ms lectura o > 20 ms escritura)
+      - alert: OracleDatafileIOHighLatency
+        expr: oratui_datafile_read_latency_ms > 15 or oratui_datafile_write_latency_ms > 20
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alta latencia I/O en datafile {{ $labels.file_name }} ({{ $labels.tablespace }})"
+          description: "El datafile {{ $labels.file_name }} en {{ $labels.host }} supera el umbral de latencia física ({{ $value }} ms)."
+
+      # 19. Tormenta de Cambios de Redo Log (>= 12 switches/hora)
+      - alert: OracleRedoLogSwitchStorm
+        expr: oratui_redo_switches_last_hour >= 12
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alta frecuencia de Redo Log Switches ({{ $value }}/h) en {{ $labels.host }}"
+          description: "Se han producido {{ $value }} cambios de Redo Log en la última hora (recomendado <= 6/h). Amplíe el tamaño de los grupos de Online Redo Log."
+
+      # 20. Errores ORA-01555 (Snapshot Too Old) en Undo Tablespace
+      - alert: OracleUndoORA01555Detected
+        expr: oratui_undo_ora01555_total > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Detectados {{ $value }} errores ORA-01555 (Snapshot Too Old) en {{ $labels.host }}"
+          description: "v$undostat reporta {{ $value }} errores ORA-01555. Aumente UNDO_RETENTION o amplíe el tablespace UNDO."
+
+      # 21. Degradación de Paralelismo (Parallel Query DOP Downgraded)
+      - alert: OracleParallelQueryDOPDowngraded
+        expr: oratui_px_downgraded_queries_total > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} consultas paralelas con DOP degradado en {{ $labels.host }}"
+          description: "Existen consultas en gv$px_session ejecutándose con menor paralelismo (DOP) del solicitado por falta de esclavos PX."
