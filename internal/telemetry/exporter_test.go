@@ -49,6 +49,21 @@ func TestRenderPrometheusAndOTelMetrics(t *testing.T) {
 		`oratui_wait_chains_active_total{`,
 		`oratui_parallel_query_downgraded{`,
 		`oratui_advisor_findings_total{`,
+		`oratui_resource_limit_current{`,
+		`oratui_resource_limit_max_hwm{`,
+		`oratui_resource_limit_used_percent{`,
+		`oratui_wait_class_seconds_total{`,
+		`oratui_wait_class_dbtime_percent{`,
+		`oratui_wait_class_aas{`,
+		`oratui_top_sql_elapsed_seconds{`,
+		`oratui_top_sql_p95_ms{`,
+		`oratui_top_sql_p99_ms{`,
+		`oratui_dataguard_dest_healthy{`,
+		`oratui_dataguard_dest_sequence_gap{`,
+		`oratui_dataguard_datum_age_seconds{`,
+		`oratui_collector_scrape_duration_ms{`,
+		`oratui_collector_timeout_budget_percent{`,
+		`oratui_subcollector_duration_ms{`,
 	}
 
 	for _, req := range requiredMetrics {
@@ -126,7 +141,7 @@ func TestSRESLOAndRemoteActions(t *testing.T) {
 		t.Fatalf("expected HTTP 200 with valid Basic Auth (admin:admin), got %d", basicRec.Code)
 	}
 
-	// 5. Test new ora-brabo actions (pin_sql_plan, run_scheduler_job, tune_memory_advisor)
+	// 5. Test new ora-brabo & harry-performance-scraper actions
 	for _, tc := range []struct {
 		payload string
 		expect  string
@@ -134,6 +149,8 @@ func TestSRESLOAndRemoteActions(t *testing.T) {
 		{`{"action":"pin_sql_plan","target":"8f4k2m91x7p0q:1049281744"}`, "SPM Plans Loaded"},
 		{`{"action":"run_scheduler_job","target":"CRM_DATA.JOB_SYNC_CREDIT_SCORES"}`, "Coordinator CJQ0"},
 		{`{"action":"tune_memory_advisor","target":"SGA:40960"}`, "SGA_SIZE_FACTOR"},
+		{`{"action":"explain_sql_plan","target":"8f4k2m91x7p0q"}`, "DBMS_XPLAN.DISPLAY_CURSOR"},
+		{`{"action":"tune_resource_limit","target":"processes:2000"}`, "SCOPE=SPFILE"},
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/action", strings.NewReader(tc.payload))
 		req.SetBasicAuth("admin", "admin")
@@ -152,7 +169,15 @@ func TestSRESLOAndRemoteActions(t *testing.T) {
 		t.Fatalf("expected HTTP 200 from /api/v1/report, got %d", repRec.Code)
 	}
 	repHTML := repRec.Body.String()
-	for _, snippet := range []string{"INFORME EJECUTIVO DE SALUD ORACLE DBA", "8f4k2m91x7p0q", "JOB_SYNC_CREDIT_SCORES", "PRODCDB1"} {
+	for _, snippet := range []string{
+		"INFORME EJECUTIVO DE SALUD ORACLE DBA",
+		"8f4k2m91x7p0q",
+		"JOB_SYNC_CREDIT_SCORES",
+		"PRODCDB1",
+		"gv$resource_limit",
+		"Top SQL Consumers",
+		"gv$archive_dest_status",
+	} {
 		if !strings.Contains(repHTML, snippet) {
 			t.Fatalf("expected /api/v1/report HTML to contain %q", snippet)
 		}

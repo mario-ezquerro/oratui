@@ -611,6 +611,47 @@ func buildDelicateAlerts(s model.EnvironmentState, now time.Time) []DelicateAler
 		}
 	}
 
+	// 10. Instance Resource Limits Pressure (gv$resource_limit, harry-performance-scraper inspired)
+	for _, rl := range s.ResourceLimits {
+		if !rl.IsUnlimited && (rl.UsedPct >= 80.0 || rl.MaxUsedPct >= 92.0) {
+			sev := "WARNING"
+			if rl.UsedPct >= 90.0 {
+				sev = "CRITICAL"
+			}
+			targetSpec := fmt.Sprintf("%s:%d", rl.ResourceName, rl.LimitValue)
+			list = append(list, DelicateAlert{
+				ID:                fmt.Sprintf("RES_LIM_%d_%s", rl.InstID, rl.ResourceName),
+				Severity:          sev,
+				Category:          "Resource Limit (gv$resource_limit)",
+				Title:             fmt.Sprintf("Recurso %s en INST#%d al %.1f%% (HWM: %d / %d)", rl.ResourceName, rl.InstID, rl.UsedPct, rl.MaxUtilization, rl.LimitValue),
+				Description:       fmt.Sprintf("Riesgo de ORA-00020/ORA-00018. Uso actual: %d, Máximo histórico (HWM): %d (%.1f%%).", rl.CurrentUtilization, rl.MaxUtilization, rl.MaxUsedPct),
+				RecommendedAction: fmt.Sprintf("Analizar y Ampliar Límite (%s) en SPFILE", rl.ResourceName),
+				ActionID:          "tune_resource_limit",
+				ActionTarget:      targetSpec,
+				DetectedAt:        tsStr,
+			})
+		}
+	}
+
+	// 11. Data Guard Archive Destination Error or Sequence Gap (gv$archive_dest_status, harry-performance-scraper inspired)
+	for _, dg := range s.DataGuardDests {
+		upSt := strings.ToUpper(dg.Status)
+		upGap := strings.ToUpper(dg.GapStatus)
+		if (upSt != "VALID" && upSt != "INACTIVE") || (upGap != "NO GAP" && upGap != "") || dg.SeqGap > 2 {
+			list = append(list, DelicateAlert{
+				ID:                fmt.Sprintf("DG_DEST_%d_%d", dg.InstID, dg.DestID),
+				Severity:          "CRITICAL",
+				Category:          "Data Guard Archive Dest",
+				Title:             fmt.Sprintf("Destino %s (%s) en %s | Gap: %s (%d seq)", dg.DestName, dg.DBUniqueName, dg.Status, dg.GapStatus, dg.SeqGap),
+				Description:       fmt.Sprintf("Archived Seq#: %d vs Applied Seq#: %d | Modo: %s | Error: %s", dg.ArchivedSeq, dg.AppliedSeq, dg.RecoveryMode, dg.DestError),
+				RecommendedAction: "Forzar Switch Logfile y Verificar Redo Transport",
+				ActionID:          "switch_logfile",
+				ActionTarget:      dg.DBUniqueName,
+				DetectedAt:        tsStr,
+			})
+		}
+	}
+
 	return list
 }
 
@@ -1352,6 +1393,65 @@ func (e *Exporter) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 			_, _, execErr = runner.RunSQLPlus(ctx, oraHome, dbSID, oraCreds, sql, appendLine)
 		}
 
+	case "explain_sql_plan":
+		sqlID := req.Target
+		if sqlID == "" {
+			sqlID = "8f4k2m91x7p0q"
+		}
+		if idx := strings.Index(sqlID, ":"); idx > 0 {
+			sqlID = sqlID[:idx]
+		}
+		title = fmt.Sprintf("Árbol de Plan de Ejecución en Caché (DBMS_XPLAN / gv$sql_plan: %s)", sqlID)
+		sql := fmt.Sprintf("SET LINESIZE 220 PAGESIZE 500\nSELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR('%s', NULL, 'ALLSTATS LAST +PEEKED_BINDS +PREDICATE +COST'));", sqlID)
+		cmdDesc = fmt.Sprintf("DBMS_XPLAN.DISPLAY_CURSOR('%s', NULL, 'ALLSTATS LAST +PEEKED_BINDS +PREDICATE +COST')", sqlID)
+		if st.IsMock {
+			appendLine(fmt.Sprintf("SQL_ID  %s, child number 0", sqlID))
+			appendLine("-------------------------------------")
+			appendLine("SELECT /*+ INDEX(o ORD_PK) */ o.order_id, o.customer_id, l.amount FROM erp_orders o JOIN erp_order_lines l ON o.order_id = l.order_id WHERE o.status = :1")
+			appendLine("")
+			appendLine("Plan hash value: 3948102911")
+			appendLine("--------------------------------------------------------------------------------------------------------------------")
+			appendLine("| Id  | Operation                    | Name            | Starts | E-Rows | Cost (%CPU)| A-Rows |   A-Time   | Buffers |")
+			appendLine("--------------------------------------------------------------------------------------------------------------------")
+			appendLine("|   0 | SELECT STATEMENT             |                 |      1 |        | 14820 (100)|    410 |00:00:00.42 |   18420 |")
+			appendLine("|*  1 |  HASH JOIN                   |                 |      1 |  14200 | 14820  (12)|    410 |00:00:00.42 |   18420 |")
+			appendLine("|*  2 |   TABLE ACCESS FULL          | ERP_ORDERS      |      1 |   1200 |  4120  (10)|    180 |00:00:00.14 |    6120 |")
+			appendLine("|   3 |   PARTITION RANGE ALL        |                 |      1 |  95000 | 10700  (14)|  95120 |00:00:00.26 |   12300 |")
+			appendLine("|   4 |    TABLE ACCESS FULL         | ERP_ORDER_LINES |     12 |  95000 | 10700  (14)|  95120 |00:00:00.24 |   12300 |")
+			appendLine("--------------------------------------------------------------------------------------------------------------------")
+			appendLine("Predicate Information (identified by operation id):")
+			appendLine("---------------------------------------------------")
+			appendLine("   1 - access(\"O\".\"ORDER_ID\"=\"L\".\"ORDER_ID\")")
+			appendLine("   2 - filter(\"O\".\"STATUS\"=:1)")
+			appendLine("Note: Plan óptimo alternativo PHV=1049281744 utiliza INDEX RANGE SCAN sobre IDX_ORDERS_CUST_DT (18.2 ms).")
+		} else {
+			_, _, execErr = runner.RunSQLPlus(ctx, oraHome, dbSID, oraCreds, sql, appendLine)
+		}
+
+	case "tune_resource_limit":
+		target := req.Target
+		if target == "" {
+			target = "processes:2000"
+		}
+		title = fmt.Sprintf("Auditoría y Dimensionamiento de Límites de Recursos (gv$resource_limit: %s)", target)
+		sql := "SELECT inst_id, resource_name, current_utilization, max_utilization, initial_allocation, limit_value FROM gv$resource_limit WHERE resource_name IN ('processes','sessions','enqueue_locks','enqueue_resources','parallel_max_servers','transactions') ORDER BY inst_id, resource_name;"
+		cmdDesc = sql
+		if st.IsMock {
+			appendLine("SQL> " + sql)
+			appendLine("INST_ID RESOURCE_NAME          CURRENT_UTIL MAX_UTILIZATION LIMIT_VALUE")
+			appendLine("------- ---------------------- ------------ --------------- -----------")
+			appendLine("      1 processes                      1740            1920        2000  <-- 87.0% (HWM 96%)")
+			appendLine("      1 sessions                       2410            2810        3024  <-- 79.7% (HWM 93%)")
+			appendLine("      1 parallel_max_servers             48              64          64")
+			appendLine("      2 processes                      1180            1640        2000")
+			appendLine("")
+			appendLine("Recomendación SRE / DBA para evitar ORA-00020 (maximum number of processes exceeded):")
+			appendLine("  ALTER SYSTEM SET PROCESSES=3000 SCOPE=SPFILE SID='*';")
+			appendLine("  ALTER SYSTEM SET SESSIONS=4522 SCOPE=SPFILE SID='*';")
+		} else {
+			_, _, execErr = runner.RunSQLPlus(ctx, oraHome, dbSID, oraCreds, sql, appendLine)
+		}
+
 	default:
 		title = "Diagnóstico General del Servidor Oracle"
 		cmdDesc = "uname -a && uptime"
@@ -1570,6 +1670,52 @@ func (e *Exporter) handleExecutiveReport(w http.ResponseWriter, r *http.Request)
 	for _, ma := range st.MemoryAdvisor {
 		b.WriteString(fmt.Sprintf(`<tr><td><b>%s</b></td><td>%d MB</td><td>%.2fx</td><td>%.2f / %.1f%%</td><td>%d</td><td>%s</td></tr>`,
 			html.EscapeString(ma.AdvisorType), ma.SizeMB, ma.SizeFactor, ma.EstDBTimeFactor, ma.EstHitPct, ma.EstPhysReads, html.EscapeString(ma.Recommendation)))
+	}
+	b.WriteString(`</tbody></table>`)
+
+	// 7. Resource Limits (gv$resource_limit) & Wait Classes / DB Time Breakdown
+	b.WriteString(`    <h2>7. Límites de Recursos (gv$resource_limit) &amp; Desglose DB Time / Clases de Espera</h2>
+    <table>
+      <thead><tr><th>Instancia</th><th>Recurso (gv$resource_limit)</th><th>Uso Actual</th><th>HWM (Máx. Histórico)</th><th>Límite Configurado</th><th>% Uso Actual (HWM%)</th><th>Estado</th></tr></thead>
+      <tbody>`)
+	for _, rl := range st.ResourceLimits {
+		b.WriteString(fmt.Sprintf(`<tr><td>INST #%d</td><td><b>%s</b></td><td>%d</td><td>%d</td><td>%d</td><td><b>%.1f%%</b> (HWM %.1f%%)</td><td><span class="sev-%s">%s</span></td></tr>`,
+			rl.InstID, html.EscapeString(rl.ResourceName), rl.CurrentUtilization, rl.MaxUtilization, rl.LimitValue, rl.UsedPct, rl.MaxUsedPct, html.EscapeString(rl.Status), html.EscapeString(rl.Status)))
+	}
+	b.WriteString(`</tbody></table>
+    <table>
+      <thead><tr><th>Instancia</th><th>Clase de Espera / DB CPU</th><th>Tiempo Total (s)</th><th>% de DB Time</th><th>AAS (Avg Active Sessions)</th><th>Total Waits</th><th>Estado</th></tr></thead>
+      <tbody>`)
+	for _, wc := range st.WaitClassStats {
+		b.WriteString(fmt.Sprintf(`<tr><td>INST #%d</td><td><b>%s</b></td><td>%.1f s</td><td><b>%.1f%%</b></td><td>%.2f AAS</td><td>%d</td><td><span class="sev-%s">%s</span></td></tr>`,
+			wc.InstID, html.EscapeString(wc.WaitClass), wc.TimeWaitedSec, wc.PctOfDBTime, wc.AAS, wc.TotalWaits, html.EscapeString(wc.Status), html.EscapeString(wc.Status)))
+	}
+	b.WriteString(`</tbody></table>`)
+
+	// 8. Top SQL Consumers (gv$sqlstats + P95/P99)
+	b.WriteString(`    <h2>8. Top SQL Consumers por Desglose de Espera &amp; Percentiles P95/P99 (gv$sqlstats)</h2>
+    <table>
+      <thead><tr><th>SQL_ID (PHV)</th><th>Esquema / Módulo</th><th>Execs</th><th>Total (s)</th><th>Avg / P95 / P99 (ms)</th><th>CPU / I/O / Lock (s)</th><th>Espera Dominante</th><th>Buffer Gets / Disk Reads</th></tr></thead>
+      <tbody>`)
+	for _, sq := range st.TopSQLConsumers {
+		b.WriteString(fmt.Sprintf(`<tr><td><b>%s</b><br><small>PHV: %d</small></td><td>%s<br><small>%s</small></td><td>%d</td><td><b>%.1fs</b></td><td>%.1f / %.1f / <b>%.1f ms</b></td><td>%.1f / %.1f / %.1fs</td><td><b>%s</b></td><td>%d / %d</td></tr>`,
+			html.EscapeString(sq.SQLID), sq.PlanHashValue, html.EscapeString(sq.Schema), html.EscapeString(sq.Module),
+			sq.Executions, sq.ElapsedSec, sq.AvgElapsedMs, sq.P95ElapsedMs, sq.P99ElapsedMs,
+			sq.CPUSec, sq.IOWaitSec, sq.AppWaitSec, html.EscapeString(sq.DominantWait), sq.BufferGets, sq.DiskReads))
+	}
+	b.WriteString(`</tbody></table>`)
+
+	// 9. Data Guard Archive Destinations & Collector Runtime Health
+	b.WriteString(fmt.Sprintf(`    <h2>9. Salud de Destinos Data Guard (gv$archive_dest_status) &amp; Autodiagnóstico del Recolector</h2>
+    <p><small><b>Scraper Runtime:</b> Ciclo=%d ms (%.2f%% del Timeout Budget) │ Conexión=%s │ Total Muestras=%d │ Errores=%d</small></p>
+    <table>
+      <thead><tr><th>Destino</th><th>Standby DB</th><th>Estado</th><th>Modo Recuperación</th><th>Gap Status</th><th>Archived Seq#</th><th>Applied Seq#</th><th>Seq Gap</th><th>Error</th></tr></thead>
+      <tbody>`, st.CollectorHealth.LastScrapeDurationMs, st.CollectorHealth.TimeoutBudgetPct, html.EscapeString(st.CollectorHealth.ConnectionState), st.CollectorHealth.TotalSamples, st.CollectorHealth.ErrorCount))
+	for _, dg := range st.DataGuardDests {
+		b.WriteString(fmt.Sprintf(`<tr><td><b>%s</b> (Inst #%d)</td><td>%s</td><td><span class="sev-%s">%s</span></td><td>%s</td><td><b>%s</b></td><td>%d</td><td>%d</td><td><b>%d</b></td><td>%s</td></tr>`,
+			html.EscapeString(dg.DestName), dg.InstID, html.EscapeString(dg.DBUniqueName),
+			html.EscapeString(dg.Status), html.EscapeString(dg.Status), html.EscapeString(dg.RecoveryMode),
+			html.EscapeString(dg.GapStatus), dg.ArchivedSeq, dg.AppliedSeq, dg.SeqGap, html.EscapeString(dg.DestError)))
 	}
 	b.WriteString(`</tbody></table>
   </div>

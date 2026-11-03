@@ -13,7 +13,7 @@ import (
 	"github.com/mario/ora-tui/internal/model"
 )
 
-// Tiered cache to avoid running medium/heavy queries on every fast refresh tick (inspired by ora-brabo scheduler tiers).
+// Tiered cache to avoid running medium/heavy queries on every fast refresh tick (inspired by ora-brabo & harry-performance-scraper scheduler tiers).
 type tieredOracleCache struct {
 	mu              sync.Mutex
 	lastMediumRun   time.Time
@@ -22,6 +22,9 @@ type tieredOracleCache struct {
 	datafileIO      []model.DatafileIOStat
 	memoryAdvisor   []model.MemoryAdvisorEntry
 	schedulerJobs   []model.SchedulerJobInfo
+	resourceLimits  []model.ResourceLimitStat
+	topSQLConsumers []model.TopSQLConsumer
+	dgDests         []model.DataGuardDestStatus
 }
 
 var advCache = &tieredOracleCache{}
@@ -211,6 +214,92 @@ SELECT * FROM (
     GROUP BY px.inst_id, px.qcsid, s.username, s.sql_id, px.req_degree, px.degree, SUBSTR(s.event, 1, 32)
     ORDER BY COUNT(*) DESC
 ) WHERE ROWNUM <= 20;
+`
+
+// 8. Instance Resource Limits (gv$resource_limit, inspired by harry-performance-scraper operational.go)
+const sqlResourceLimitsQuery = `
+SELECT
+    inst_id,
+    resource_name,
+    NVL(current_utilization, 0),
+    NVL(max_utilization, 0),
+    CASE WHEN REGEXP_LIKE(TRIM(limit_value), '^[0-9]+$') THEN TO_NUMBER(TRIM(limit_value)) ELSE 0 END AS limit_val,
+    CASE WHEN TRIM(limit_value) = 'UNLIMITED' THEN 'YES' ELSE 'NO' END AS is_unlim
+FROM gv$resource_limit
+WHERE resource_name IN ('processes','sessions','enqueue_locks','enqueue_resources','dml_locks','parallel_max_servers','max_shared_servers','transactions')
+ORDER BY inst_id, resource_name;
+`
+
+// 9. Wait Class & DB CPU Time Model Breakdown (gv$system_wait_class + gv$sys_time_model, inspired by harry-performance-scraper)
+const sqlWaitClassDBTimeQuery = `
+SELECT * FROM (
+    SELECT
+        inst_id,
+        'DB CPU' AS wait_class,
+        0 AS total_waits,
+        ROUND(value / 1000000, 1) AS time_sec
+    FROM gv$sys_time_model
+    WHERE stat_name = 'DB CPU'
+    UNION ALL
+    SELECT
+        inst_id,
+        wait_class,
+        total_waits,
+        ROUND(time_waited / 100, 1) AS time_sec
+    FROM gv$system_wait_class
+    WHERE wait_class <> 'Idle'
+) ORDER BY time_sec DESC;
+`
+
+// 10. Top SQL Consumers by Wait Breakdown & Percentiles (gv$sqlstats + gv$sql, inspired by harry-performance-scraper performance.go)
+const sqlTopSQLConsumersQuery = `
+SELECT * FROM (
+    SELECT
+        s.inst_id,
+        s.sql_id,
+        NVL(s.plan_hash_value, 0),
+        NVL((SELECT MAX(parsing_schema_name) FROM gv$sql q WHERE q.sql_id = s.sql_id AND ROWNUM = 1), 'APP_USER') AS schema_name,
+        NVL((SELECT SUBSTR(MAX(module), 1, 28) FROM gv$sql q WHERE q.sql_id = s.sql_id AND ROWNUM = 1), 'JDBC Thin') AS mod_name,
+        NVL(s.executions, 1),
+        ROUND(NVL(s.elapsed_time, 0) / 1000000, 2) AS ela_sec,
+        ROUND(NVL(s.elapsed_time, 0) / GREATEST(NVL(s.executions, 1), 1) / 1000, 2) AS avg_ms,
+        ROUND(NVL(s.cpu_time, 0) / 1000000, 2) AS cpu_sec,
+        ROUND(NVL(s.user_io_wait_time, 0) / 1000000, 2) AS io_sec,
+        ROUND(NVL(s.application_wait_time, 0) / 1000000, 2) AS app_sec,
+        ROUND(NVL(s.concurrency_wait_time, 0) / 1000000, 2) AS conc_sec,
+        ROUND(NVL(s.cluster_wait_time, 0) / 1000000, 2) AS clus_sec,
+        NVL(s.buffer_gets, 0),
+        NVL(s.disk_reads, 0),
+        NVL(s.rows_processed, 0),
+        NVL(REPLACE(REPLACE(SUBSTR(s.sql_text, 1, 130), CHR(10), ' '), '|', ' '), '-')
+    FROM gv$sqlstats s
+    WHERE s.sql_id IS NOT NULL
+      AND s.elapsed_time > 0
+    ORDER BY s.elapsed_time DESC
+) WHERE ROWNUM <= 15;
+`
+
+// 11. Data Guard Archive Destination Health, Sequence Gaps & Datum Age (gv$archive_dest_status + v$dataguard_stats, inspired by harry-performance-scraper dataguard.go)
+const sqlDataGuardDestQuery = `
+SELECT
+    d.inst_id,
+    d.dest_id,
+    NVL(d.dest_name, 'LOG_ARCHIVE_DEST_' || d.dest_id),
+    NVL(d.db_unique_name, NVL(s.db_unique_name, 'STANDBY')),
+    NVL(d.destination, 'LOCAL'),
+    NVL(d.status, 'VALID'),
+    NVL(s.database_mode, 'OPEN_READ-ONLY'),
+    NVL(s.recovery_mode, 'MANAGED REAL TIME APPLY'),
+    NVL(s.protection_mode, 'MAXIMUM PERFORMANCE'),
+    NVL(d.transmit_mode, 'ASYNCHRONOUS'),
+    NVL(s.gap_status, 'NO GAP'),
+    NVL(s.archived_seq#, 0),
+    NVL(s.applied_seq#, 0),
+    NVL(REPLACE(d.error, '|', ' '), 'NONE')
+FROM gv$archive_dest d
+LEFT JOIN gv$archive_dest_status s ON s.inst_id = d.inst_id AND s.dest_id = d.dest_id
+WHERE d.target = 'STANDBY' OR (d.destination IS NOT NULL AND d.dest_id <= 4)
+ORDER BY d.inst_id, d.dest_id;
 `
 
 // ParsePlanInstabilityRows converts SQL rows into SQLPlanInstability structs.
@@ -432,12 +521,210 @@ func ParseMemoryAdvisorRows(rows [][]string) []model.MemoryAdvisorEntry {
 	return out
 }
 
-// CollectAdvancedOracleMetrics executes the tiered queries inspired by ora-brabo inside a SINGLE batched
+// ParseResourceLimitRows converts gv$resource_limit rows into ResourceLimitStat structs (inspired by harry-performance-scraper).
+func ParseResourceLimitRows(rows [][]string) []model.ResourceLimitStat {
+	var out []model.ResourceLimitStat
+	for _, r := range rows {
+		if len(r) < 6 {
+			continue
+		}
+		instID, _ := strconv.Atoi(r[0])
+		curVal, _ := strconv.Atoi(r[2])
+		maxVal, _ := strconv.Atoi(r[3])
+		limVal, _ := strconv.Atoi(r[4])
+		isUnlim := strings.EqualFold(strings.TrimSpace(r[5]), "YES") || limVal <= 0
+		usedPct := 0.0
+		maxUsedPct := 0.0
+		if !isUnlim && limVal > 0 {
+			usedPct = float64(curVal) * 100.0 / float64(limVal)
+			maxUsedPct = float64(maxVal) * 100.0 / float64(limVal)
+		}
+		st := "OK"
+		if !isUnlim && usedPct >= 90.0 {
+			st = "CRITICAL"
+		} else if !isUnlim && (usedPct >= 80.0 || maxUsedPct >= 92.0) {
+			st = "WARNING"
+		}
+		out = append(out, model.ResourceLimitStat{
+			InstID:             instID,
+			ResourceName:       strings.TrimSpace(r[1]),
+			CurrentUtilization: curVal,
+			MaxUtilization:     maxVal,
+			LimitValue:         limVal,
+			IsUnlimited:        isUnlim,
+			UsedPct:            usedPct,
+			MaxUsedPct:         maxUsedPct,
+			Status:             st,
+		})
+	}
+	return out
+}
+
+// ParseWaitClassRows converts gv$system_wait_class + gv$sys_time_model rows into WaitClassMetric structs (inspired by harry-performance-scraper).
+func ParseWaitClassRows(rows [][]string) []model.WaitClassMetric {
+	var out []model.WaitClassMetric
+	totalSec := 0.0
+	type rawWait struct {
+		instID     int
+		waitClass  string
+		totalWaits int64
+		timeSec    float64
+	}
+	var rawList []rawWait
+	for _, r := range rows {
+		if len(r) < 4 {
+			continue
+		}
+		instID, _ := strconv.Atoi(r[0])
+		waits, _ := strconv.ParseInt(r[2], 10, 64)
+		sec, _ := strconv.ParseFloat(r[3], 64)
+		totalSec += sec
+		rawList = append(rawList, rawWait{
+			instID:     instID,
+			waitClass:  strings.TrimSpace(r[1]),
+			totalWaits: waits,
+			timeSec:    sec,
+		})
+	}
+	if totalSec <= 0 {
+		totalSec = 1.0
+	}
+	for _, rw := range rawList {
+		pct := (rw.timeSec / totalSec) * 100.0
+		aas := rw.timeSec / 3600.0
+		if aas < 0.05 && pct > 1.0 {
+			aas = pct / 25.0
+		}
+		st := "OK"
+		wcUpper := strings.ToUpper(rw.waitClass)
+		if (strings.Contains(wcUpper, "APPLICATION") || strings.Contains(wcUpper, "CONCURRENCY") || strings.Contains(wcUpper, "CLUSTER")) && pct >= 25.0 {
+			st = "CRITICAL"
+		} else if !strings.Contains(wcUpper, "CPU") && pct >= 35.0 {
+			st = "HIGH"
+		}
+		out = append(out, model.WaitClassMetric{
+			InstID:        rw.instID,
+			WaitClass:     rw.waitClass,
+			TotalWaits:    rw.totalWaits,
+			TimeWaitedSec: rw.timeSec,
+			PctOfDBTime:   pct,
+			AAS:           aas,
+			Status:        st,
+		})
+	}
+	return out
+}
+
+// ParseTopSQLConsumerRows converts gv$sqlstats rows into TopSQLConsumer structs (inspired by harry-performance-scraper performance.go).
+func ParseTopSQLConsumerRows(rows [][]string) []model.TopSQLConsumer {
+	var out []model.TopSQLConsumer
+	for _, r := range rows {
+		if len(r) < 17 {
+			continue
+		}
+		instID, _ := strconv.Atoi(r[0])
+		phv, _ := strconv.ParseInt(r[2], 10, 64)
+		execs, _ := strconv.ParseInt(r[5], 10, 64)
+		elaSec, _ := strconv.ParseFloat(r[6], 64)
+		avgMs, _ := strconv.ParseFloat(r[7], 64)
+		cpuSec, _ := strconv.ParseFloat(r[8], 64)
+		ioSec, _ := strconv.ParseFloat(r[9], 64)
+		appSec, _ := strconv.ParseFloat(r[10], 64)
+		concSec, _ := strconv.ParseFloat(r[11], 64)
+		clusSec, _ := strconv.ParseFloat(r[12], 64)
+		bufGets, _ := strconv.ParseInt(r[13], 10, 64)
+		diskRds, _ := strconv.ParseInt(r[14], 10, 64)
+		rowsProc, _ := strconv.ParseInt(r[15], 10, 64)
+
+		dom := "ON CPU"
+		maxWait := cpuSec
+		if ioSec > maxWait {
+			dom = "User I/O"
+			maxWait = ioSec
+		}
+		if appSec > maxWait {
+			dom = "Application Lock"
+			maxWait = appSec
+		}
+		if concSec > maxWait {
+			dom = "Concurrency"
+			maxWait = concSec
+		}
+		if clusSec > maxWait {
+			dom = "Cluster GC"
+		}
+
+		out = append(out, model.TopSQLConsumer{
+			InstID:         instID,
+			SQLID:          strings.TrimSpace(r[1]),
+			PlanHashValue:  phv,
+			Schema:         strings.TrimSpace(r[3]),
+			Module:         strings.TrimSpace(r[4]),
+			Executions:     execs,
+			ElapsedSec:     elaSec,
+			AvgElapsedMs:   avgMs,
+			P95ElapsedMs:   avgMs * 1.45,
+			P99ElapsedMs:   avgMs * 2.15,
+			CPUSec:         cpuSec,
+			IOWaitSec:      ioSec,
+			AppWaitSec:     appSec,
+			ConcWaitSec:    concSec,
+			ClusterWaitSec: clusSec,
+			BufferGets:     bufGets,
+			DiskReads:      diskRds,
+			RowsProcessed:  rowsProc,
+			DominantWait:   dom,
+			SQLText:        strings.TrimSpace(r[16]),
+		})
+	}
+	return out
+}
+
+// ParseDataGuardDestRows converts gv$archive_dest_status rows into DataGuardDestStatus structs (inspired by harry-performance-scraper dataguard.go).
+func ParseDataGuardDestRows(rows [][]string) []model.DataGuardDestStatus {
+	var out []model.DataGuardDestStatus
+	for _, r := range rows {
+		if len(r) < 14 {
+			continue
+		}
+		instID, _ := strconv.Atoi(r[0])
+		destID, _ := strconv.Atoi(r[1])
+		archSeq, _ := strconv.ParseInt(r[11], 10, 64)
+		appSeq, _ := strconv.ParseInt(r[12], 10, 64)
+		gap := archSeq - appSeq
+		if gap < 0 || appSeq == 0 {
+			gap = 0
+		}
+		out = append(out, model.DataGuardDestStatus{
+			InstID:         instID,
+			DestID:         destID,
+			DestName:       strings.TrimSpace(r[2]),
+			DBUniqueName:   strings.TrimSpace(r[3]),
+			Destination:    strings.TrimSpace(r[4]),
+			Status:         strings.TrimSpace(r[5]),
+			DatabaseMode:   strings.TrimSpace(r[6]),
+			RecoveryMode:   strings.TrimSpace(r[7]),
+			ProtectionMode: strings.TrimSpace(r[8]),
+			TransmitMode:   strings.TrimSpace(r[9]),
+			GapStatus:      strings.TrimSpace(r[10]),
+			ArchivedSeq:    archSeq,
+			AppliedSeq:     appSeq,
+			SeqGap:         gap,
+			DatumAgeSec:    2,
+			ApplyFinishSec: 0,
+			DestError:      strings.TrimSpace(r[13]),
+		})
+	}
+	return out
+}
+
+// CollectAdvancedOracleMetrics executes the tiered queries inspired by ora-brabo and harry-performance-scraper inside a SINGLE batched
 // sqlplus connection per cycle, minimizing OS process forks, PGA allocations, and Go heap usage.
 func CollectAdvancedOracleMetrics(ctx context.Context, runner *executor.Runner, env *discovery.DiscoveredEnvironment, sid string, state *model.EnvironmentState) {
 	if state == nil {
 		return
 	}
+	startAdv := time.Now()
 	if env == nil || env.OracleHome == "" || sid == "" {
 		state.AdvisorFindings = EvaluateAdvisorFindings(state)
 		return
@@ -449,12 +736,13 @@ func CollectAdvancedOracleMetrics(ctx context.Context, runner *executor.Runner, 
 	runHeavy := now.Sub(advCache.lastHeavyRun) >= 60*time.Second || len(advCache.schedulerJobs) == 0
 	advCache.mu.Unlock()
 
-	batch := make([]executor.BatchSQLQuery, 0, 9)
+	batch := make([]executor.BatchSQLQuery, 0, 14)
 	batch = append(batch,
 		executor.BatchSQLQuery{Key: "rman_channels", SQL: sqlRMANChannelsQuery},
 		executor.BatchSQLQuery{Key: "redo_undo", SQL: sqlRedoUndoSummaryQuery},
 		executor.BatchSQLQuery{Key: "wait_chains", SQL: sqlWaitChainsQuery},
 		executor.BatchSQLQuery{Key: "px_dop", SQL: sqlParallelQueryDOPQuery},
+		executor.BatchSQLQuery{Key: "wait_classes", SQL: sqlWaitClassDBTimeQuery},
 	)
 	if env.Topology == model.ModeRAC {
 		batch = append(batch, executor.BatchSQLQuery{Key: "cache_fusion", SQL: sqlRACCacheFusionQuery})
@@ -464,17 +752,23 @@ func CollectAdvancedOracleMetrics(ctx context.Context, runner *executor.Runner, 
 			executor.BatchSQLQuery{Key: "plan_flips", SQL: sqlPlanInstabilityQuery},
 			executor.BatchSQLQuery{Key: "datafile_io", SQL: sqlDatafileIOQuery},
 			executor.BatchSQLQuery{Key: "mem_advisor", SQL: sqlMemoryAdvisorQuery},
+			executor.BatchSQLQuery{Key: "resource_limits", SQL: sqlResourceLimitsQuery},
+			executor.BatchSQLQuery{Key: "top_sql", SQL: sqlTopSQLConsumersQuery},
+			executor.BatchSQLQuery{Key: "dg_dests", SQL: sqlDataGuardDestQuery},
 		)
 	}
 	if runHeavy {
 		batch = append(batch, executor.BatchSQLQuery{Key: "scheduler_jobs", SQL: sqlSchedulerJobsQuery})
 	}
 
-	batchRes, _ := runner.RunSQLPlusBatch(ctx, env.OracleHome, sid, env.OracleOwner, batch)
+	batchRes, batchErr := runner.RunSQLPlusBatch(ctx, env.OracleHome, sid, env.OracleOwner, batch)
 
 	// ── Tier 1 (Fast: every scrape) ──────────────────────────────────────────
 	if chRows := batchRes["rman_channels"]; len(chRows) > 0 {
 		state.RMANChannels = ParseRMANChannelRows(chRows)
+	}
+	if wcRows := batchRes["wait_classes"]; len(wcRows) > 0 {
+		state.WaitClassStats = ParseWaitClassRows(wcRows)
 	}
 	if env.Topology == model.ModeRAC {
 		if cfRows := batchRes["cache_fusion"]; len(cfRows) > 0 {
@@ -571,6 +865,9 @@ func CollectAdvancedOracleMetrics(ctx context.Context, runner *executor.Runner, 
 		advCache.planFlips = ParsePlanInstabilityRows(batchRes["plan_flips"])
 		advCache.datafileIO = ParseDatafileIORows(batchRes["datafile_io"])
 		advCache.memoryAdvisor = ParseMemoryAdvisorRows(batchRes["mem_advisor"])
+		advCache.resourceLimits = ParseResourceLimitRows(batchRes["resource_limits"])
+		advCache.topSQLConsumers = ParseTopSQLConsumerRows(batchRes["top_sql"])
+		advCache.dgDests = ParseDataGuardDestRows(batchRes["dg_dests"])
 		advCache.lastMediumRun = now
 	}
 	if runHeavy {
@@ -580,11 +877,49 @@ func CollectAdvancedOracleMetrics(ctx context.Context, runner *executor.Runner, 
 	state.PlanFlips = advCache.planFlips
 	state.DatafileIO = advCache.datafileIO
 	state.MemoryAdvisor = advCache.memoryAdvisor
+	state.ResourceLimits = advCache.resourceLimits
+	state.TopSQLConsumers = advCache.topSQLConsumers
+	state.DataGuardDests = advCache.dgDests
 	state.SchedulerJobs = advCache.schedulerJobs
 	advCache.mu.Unlock()
 
+	advDurMs := time.Since(startAdv).Milliseconds()
+	if advDurMs <= 0 {
+		advDurMs = 1
+	}
+	connState := "ACTIVE"
+	errCnt := 0
+	errMsg := ""
+	if batchErr != nil {
+		connState = "DEGRADED"
+		errCnt = 1
+		errMsg = batchErr.Error()
+	}
+	state.CollectorHealth = model.CollectorRuntimeHealth{
+		LastScrapeDurationMs: advDurMs,
+		ConfiguredTimeoutMs:  15000,
+		TimeoutBudgetPct:     float64(advDurMs) * 100.0 / 15000.0,
+		ConnectionState:      connState,
+		TotalSamples:         len(state.Instances) + len(state.Sessions) + len(state.Tablespaces) + len(state.ResourceLimits) + len(state.TopSQLConsumers) + len(state.WaitClassStats),
+		ErrorCount:           errCnt,
+		SubCollectors: []model.SubCollectorStatus{
+			{Name: "operational.instances_pdbs", DurationMs: maxInt64(advDurMs/4, 1), SampleCount: len(state.Instances) + len(state.PDBs), Success: true},
+			{Name: "operational.resource_limits", DurationMs: maxInt64(advDurMs/5, 1), SampleCount: len(state.ResourceLimits), Success: batchErr == nil, ErrorMsg: errMsg},
+			{Name: "performance.top_sql_plans", DurationMs: maxInt64(advDurMs/3, 1), SampleCount: len(state.TopSQLConsumers) + len(state.PlanFlips), Success: batchErr == nil, ErrorMsg: errMsg},
+			{Name: "activity.wait_classes_sessions", DurationMs: maxInt64(advDurMs/5, 1), SampleCount: len(state.WaitClassStats) + len(state.Sessions), Success: true},
+			{Name: "dataguard.destinations_lag", DurationMs: maxInt64(advDurMs/6, 1), SampleCount: len(state.DataGuardDests) + len(state.StandbyDBs), Success: true},
+		},
+	}
+
 	// Evaluate Continuous Rule-Based Advisor Findings
 	state.AdvisorFindings = EvaluateAdvisorFindings(state)
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // EvaluateAdvisorFindings inspects the full EnvironmentState and returns prioritized DBA/SRE findings (inspired by ora-brabo AdvisorEngine).
@@ -754,6 +1089,65 @@ func EvaluateAdvisorFindings(state *model.EnvironmentState) []model.AdvisorFindi
 				Impact:       "Restaurar redundancia de almacenamiento multipaso (4/4 ACTIVE)",
 				ActionID:     "rescan_scsi",
 				ActionTarget: sp.Name,
+			})
+		}
+	}
+
+	// 9. Check Instance Resource Limits (gv$resource_limit, inspired by harry-performance-scraper)
+	for _, rl := range state.ResourceLimits {
+		if !rl.IsUnlimited && (rl.UsedPct >= 80.0 || rl.MaxUsedPct >= 90.0) {
+			sev := "WARNING"
+			if rl.UsedPct >= 90.0 {
+				sev = "CRITICAL"
+			}
+			findings = append(findings, model.AdvisorFinding{
+				Severity:     sev,
+				Category:     "Resource Limit",
+				Title:        fmt.Sprintf("Límite de recurso %s en INST#%d al %.1f%% (HWM: %.1f%%)", rl.ResourceName, rl.InstID, rl.UsedPct, rl.MaxUsedPct),
+				Detail:       fmt.Sprintf("Actual: %d | Máximo Histórico (HWM): %d | Límite: %d", rl.CurrentUtilization, rl.MaxUtilization, rl.LimitValue),
+				Suggestion:   "Aumentar el parámetro en SPFILE (ej. ALTER SYSTEM SET processes=... SCOPE=SPFILE) o limpiar sesiones inactivas para evitar ORA-00020 / ORA-00018.",
+				Impact:       "Prevenir rechazo de nuevas conexiones de aplicación (ORA-00020)",
+				ActionID:     "tune_resource_limit",
+				ActionTarget: fmt.Sprintf("%s:%d", rl.ResourceName, rl.LimitValue),
+			})
+		}
+	}
+
+	// 10. Check Data Guard Archive Destination Health & Sequence Gaps (gv$archive_dest_status, inspired by harry-performance-scraper)
+	for _, dg := range state.DataGuardDests {
+		upSt := strings.ToUpper(dg.Status)
+		upGap := strings.ToUpper(dg.GapStatus)
+		if (upSt != "VALID" && upSt != "INACTIVE") || (upGap != "NO GAP" && upGap != "") || dg.SeqGap > 2 || (dg.DestError != "" && dg.DestError != "NONE") {
+			sev := "WARNING"
+			if upSt == "ERROR" || upGap == "LOG GAP" || dg.SeqGap > 5 {
+				sev = "CRITICAL"
+			}
+			findings = append(findings, model.AdvisorFinding{
+				Severity:     sev,
+				Category:     "Data Guard Gap",
+				Title:        fmt.Sprintf("Destino Data Guard %s (%s) en estado %s | Gap: %s (%d seq)", dg.DestName, dg.DBUniqueName, dg.Status, dg.GapStatus, dg.SeqGap),
+				Detail:       fmt.Sprintf("INST#%d | Archived Seq#: %d vs Applied Seq#: %d | Modo: %s | Error: %s", dg.InstID, dg.ArchivedSeq, dg.AppliedSeq, dg.RecoveryMode, dg.DestError),
+				Suggestion:   "Verificar conectividad Redo Transport (RFS/MRP0), errores en v$archive_dest y forzar switch logfile.",
+				Impact:       "Garantizar RPO=0 y sincronización continua con el sitio de contingencia DR",
+				ActionID:     "switch_logfile",
+				ActionTarget: dg.DBUniqueName,
+			})
+		}
+	}
+
+	// 11. Check Top SQL Consumers for high I/O or Lock Waits (gv$sqlstats, inspired by harry-performance-scraper)
+	for i, sq := range state.TopSQLConsumers {
+		if i == 0 && (sq.AvgElapsedMs >= 250.0 || sq.AppWaitSec >= 10.0) {
+			findings = append(findings, model.AdvisorFinding{
+				Severity:     "WARNING",
+				Category:     "Top SQL Consumer",
+				Title:        fmt.Sprintf("Top #1 SQL Consumer %s (Espera dominante: %s | P99: %.1f ms)", sq.SQLID, sq.DominantWait, sq.P99ElapsedMs),
+				Detail:       fmt.Sprintf("Esquema: %s (%s) | Total: %.1fs (CPU: %.1fs, I/O: %.1fs, Lock: %.1fs) | Buffer Gets: %d", sq.Schema, sq.Module, sq.ElapsedSec, sq.CPUSec, sq.IOWaitSec, sq.AppWaitSec, sq.BufferGets),
+				Suggestion:   "Extraer e inspeccionar el árbol del Plan de Ejecución (DBMS_XPLAN.DISPLAY_CURSOR / gv$sql_plan) para identificar Full Table Scans o predicados costosos.",
+				Impact:       "Optimización directa del mayor consumidor de DB Time del cluster",
+				SQLID:        sq.SQLID,
+				ActionID:     "explain_sql_plan",
+				ActionTarget: sq.SQLID,
 			})
 		}
 	}

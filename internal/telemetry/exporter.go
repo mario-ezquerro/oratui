@@ -595,6 +595,72 @@ func RenderPrometheusMetrics(st model.EnvironmentState, updated time.Time, versi
 	writeHelpType("oratui_advisor_findings_total", "Number of active automatic advisor findings", "gauge")
 	b.WriteString(fmt.Sprintf("oratui_advisor_findings_total{host=%q,cluster=%q} %d\n", host, cluster, len(st.AdvisorFindings)))
 
+	// 22. Instance Resource Limits & High-Water Marks (gv$resource_limit, harry-performance-scraper inspired)
+	writeHelpType("oratui_resource_limit_current", "Current utilization of Oracle instance resource in gv$resource_limit", "gauge")
+	writeHelpType("oratui_resource_limit_max_hwm", "High-Water Mark (max_utilization) of Oracle instance resource since startup", "gauge")
+	writeHelpType("oratui_resource_limit_used_percent", "Percentage of configured limit_value consumed by Oracle instance resource", "gauge")
+	for _, rl := range st.ResourceLimits {
+		labels := fmt.Sprintf("host=%q,cluster=%q,inst_id=%q,resource=%q,status=%q",
+			host, cluster, strconv.Itoa(rl.InstID), rl.ResourceName, rl.Status)
+		b.WriteString(fmt.Sprintf("oratui_resource_limit_current{%s} %d\n", labels, rl.CurrentUtilization))
+		b.WriteString(fmt.Sprintf("oratui_resource_limit_max_hwm{%s} %d\n", labels, rl.MaxUtilization))
+		b.WriteString(fmt.Sprintf("oratui_resource_limit_used_percent{%s} %.2f\n", labels, rl.UsedPct))
+	}
+
+	// 23. Wait Classes & DB CPU Time Model Breakdown (gv$system_wait_class + gv$sys_time_model)
+	writeHelpType("oratui_wait_class_seconds_total", "Cumulative time in seconds spent in foreground wait class or DB CPU", "gauge")
+	writeHelpType("oratui_wait_class_dbtime_percent", "Percentage share of total DB Time by wait class or DB CPU", "gauge")
+	writeHelpType("oratui_wait_class_aas", "Estimated Average Active Sessions (AAS) contribution by wait class", "gauge")
+	for _, wc := range st.WaitClassStats {
+		labels := fmt.Sprintf("host=%q,cluster=%q,inst_id=%q,wait_class=%q,status=%q",
+			host, cluster, strconv.Itoa(wc.InstID), wc.WaitClass, wc.Status)
+		b.WriteString(fmt.Sprintf("oratui_wait_class_seconds_total{%s} %.2f\n", labels, wc.TimeWaitedSec))
+		b.WriteString(fmt.Sprintf("oratui_wait_class_dbtime_percent{%s} %.2f\n", labels, wc.PctOfDBTime))
+		b.WriteString(fmt.Sprintf("oratui_wait_class_aas{%s} %.2f\n", labels, wc.AAS))
+	}
+
+	// 24. Top SQL Consumers & Percentiles P95/P99 (gv$sqlstats)
+	writeHelpType("oratui_top_sql_elapsed_seconds", "Total elapsed time in seconds for top SQL consumer in gv$sqlstats", "gauge")
+	writeHelpType("oratui_top_sql_p95_ms", "Estimated P95 latency in milliseconds for top SQL consumer", "gauge")
+	writeHelpType("oratui_top_sql_p99_ms", "Estimated P99 latency in milliseconds for top SQL consumer", "gauge")
+	writeHelpType("oratui_top_sql_cpu_seconds", "Total CPU time in seconds for top SQL consumer", "gauge")
+	writeHelpType("oratui_top_sql_io_wait_seconds", "Total User I/O wait time in seconds for top SQL consumer", "gauge")
+	for _, sq := range st.TopSQLConsumers {
+		labels := fmt.Sprintf("host=%q,cluster=%q,inst_id=%q,sql_id=%q,phv=%q,schema=%q,dominant_wait=%q",
+			host, cluster, strconv.Itoa(sq.InstID), sq.SQLID, strconv.FormatInt(sq.PlanHashValue, 10), sq.Schema, sq.DominantWait)
+		b.WriteString(fmt.Sprintf("oratui_top_sql_elapsed_seconds{%s} %.2f\n", labels, sq.ElapsedSec))
+		b.WriteString(fmt.Sprintf("oratui_top_sql_p95_ms{%s} %.2f\n", labels, sq.P95ElapsedMs))
+		b.WriteString(fmt.Sprintf("oratui_top_sql_p99_ms{%s} %.2f\n", labels, sq.P99ElapsedMs))
+		b.WriteString(fmt.Sprintf("oratui_top_sql_cpu_seconds{%s} %.2f\n", labels, sq.CPUSec))
+		b.WriteString(fmt.Sprintf("oratui_top_sql_io_wait_seconds{%s} %.2f\n", labels, sq.IOWaitSec))
+	}
+
+	// 25. Data Guard Archive Destinations & Sequence Gaps (gv$archive_dest_status)
+	writeHelpType("oratui_dataguard_dest_healthy", "Data Guard archive destination health (1=VALID & NO GAP, 0=ERROR/GAP)", "gauge")
+	writeHelpType("oratui_dataguard_dest_sequence_gap", "Difference between archived_seq# and applied_seq# on standby destination", "gauge")
+	writeHelpType("oratui_dataguard_datum_age_seconds", "Age in seconds of v$dataguard_stats datum heartbeat", "gauge")
+	for _, dg := range st.DataGuardDests {
+		healthy := boolToFloat(strings.EqualFold(dg.Status, "VALID") && (strings.EqualFold(dg.GapStatus, "NO GAP") || dg.GapStatus == "") && dg.SeqGap <= 2)
+		labels := fmt.Sprintf("host=%q,cluster=%q,inst_id=%q,dest_name=%q,standby=%q,status=%q,gap_status=%q,recovery_mode=%q",
+			host, cluster, strconv.Itoa(dg.InstID), dg.DestName, dg.DBUniqueName, dg.Status, dg.GapStatus, dg.RecoveryMode)
+		b.WriteString(fmt.Sprintf("oratui_dataguard_dest_healthy{%s} %.0f\n", labels, healthy))
+		b.WriteString(fmt.Sprintf("oratui_dataguard_dest_sequence_gap{%s} %d\n", labels, dg.SeqGap))
+		b.WriteString(fmt.Sprintf("oratui_dataguard_datum_age_seconds{%s} %d\n", labels, dg.DatumAgeSec))
+	}
+
+	// 26. Collector Self-Diagnostic Runtime Health (harry-performance-scraper RuntimeSample inspired)
+	writeHelpType("oratui_collector_scrape_duration_ms", "Duration in milliseconds of the last Oracle collector scrape cycle", "gauge")
+	b.WriteString(fmt.Sprintf("oratui_collector_scrape_duration_ms{host=%q,cluster=%q,connection_state=%q} %d\n",
+		host, cluster, st.CollectorHealth.ConnectionState, st.CollectorHealth.LastScrapeDurationMs))
+	writeHelpType("oratui_collector_timeout_budget_percent", "Percentage of configured query timeout consumed by the last scrape", "gauge")
+	b.WriteString(fmt.Sprintf("oratui_collector_timeout_budget_percent{host=%q,cluster=%q} %.2f\n",
+		host, cluster, st.CollectorHealth.TimeoutBudgetPct))
+	writeHelpType("oratui_subcollector_duration_ms", "Duration in milliseconds per internal sub-collector module", "gauge")
+	for _, sc := range st.CollectorHealth.SubCollectors {
+		b.WriteString(fmt.Sprintf("oratui_subcollector_duration_ms{host=%q,cluster=%q,subcollector=%q,success=%q} %d\n",
+			host, cluster, sc.Name, strconv.FormatBool(sc.Success), sc.DurationMs))
+	}
+
 	return b.String()
 }
 

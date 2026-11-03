@@ -2837,10 +2837,10 @@ func (u *AppUI) buildAdvisorPage() tview.Primitive {
 		}
 	})
 
-	// Panel [2/3]: SQL Plan Flips (gv$sql) & Business Scheduler Jobs (dba_scheduler_jobs)
+	// Panel [2/3]: SQL Plan Flips (gv$sql), Top SQL Consumers (gv$sqlstats) & Business Scheduler Jobs (dba_scheduler_jobs)
 	sqlJobTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
-	sqlJobTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] REGRESION DE PLANES SQL (Plan Flips gv$sql) & JOBS DE NEGOCIO (DBMS_SCHEDULER)", "Clic/Enter = Fijar Plan SPM / Ejecutar Job"))
-	sHeaders := []string{"TIPO", "ID / JOB_NAME", "ESQUEMA", "ESTADO", "METRICA ACTUAL", "REFERENCIA OPTIMA", "DETALLE / SQL"}
+	sqlJobTbl.SetBorder(true).SetTitle(u.winTitle("[2/3] TOP SQL CONSUMERS (gv$sqlstats P95/P99), PLAN FLIPS & JOBS (DBMS_SCHEDULER)", "Clic/Enter = Ver Plan XPLAN / Fijar SPM / Ejecutar Job"))
+	sHeaders := []string{"TIPO", "ID / JOB_NAME", "ESQUEMA", "ESTADO / ESPERA", "METRICA ACTUAL", "REFERENCIA / P95-P99", "DETALLE / SQL"}
 	for c, h := range sHeaders {
 		sqlJobTbl.SetCell(0, c, HeaderCell(h))
 	}
@@ -2853,6 +2853,16 @@ func (u *AppUI) buildAdvisorPage() tview.Primitive {
 		sqlJobTbl.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("PHV %d (%.1f ms)", pf.CurrentPHV, pf.AvgElapsedMs)))
 		sqlJobTbl.SetCell(rowIdx, 5, tview.NewTableCell(fmt.Sprintf("PHV %d (%.1f ms)", pf.BestPHV, pf.BestElapsedMs)))
 		sqlJobTbl.SetCell(rowIdx, 6, tview.NewTableCell(pf.SQLText))
+		rowIdx++
+	}
+	for _, sq := range u.State.TopSQLConsumers {
+		sqlJobTbl.SetCell(rowIdx, 0, AccentCell("TOP SQL DELTA"))
+		sqlJobTbl.SetCell(rowIdx, 1, KeyCell(sq.SQLID))
+		sqlJobTbl.SetCell(rowIdx, 2, tview.NewTableCell(sq.Schema))
+		sqlJobTbl.SetCell(rowIdx, 3, AccentCell(sq.DominantWait))
+		sqlJobTbl.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("Tot: %.1fs (CPU:%.0fs/IO:%.0fs)", sq.ElapsedSec, sq.CPUSec, sq.IOWaitSec)))
+		sqlJobTbl.SetCell(rowIdx, 5, tview.NewTableCell(fmt.Sprintf("P95:%.0fms / P99:%.0fms", sq.P95ElapsedMs, sq.P99ElapsedMs)))
+		sqlJobTbl.SetCell(rowIdx, 6, tview.NewTableCell(sq.SQLText))
 		rowIdx++
 	}
 	for _, jb := range u.State.SchedulerJobs {
@@ -2868,8 +2878,25 @@ func (u *AppUI) buildAdvisorPage() tview.Primitive {
 	ensureSelectableRow(sqlJobTbl, len(sHeaders), "Sin regresiones de planes SQL ni jobs de negocio registrados")
 	u.bindTableActions(sqlJobTbl, func(row, col int) {
 		u.showActionMenuModal(
-			" ══ ACCIONES SQL PLAN BASELINE (SPM) & DBMS_SCHEDULER ══ ",
+			" ══ ACCIONES TOP SQL (DBMS_XPLAN), SQL PLAN BASELINE (SPM) & DBMS_SCHEDULER ══ ",
 			[]menuAction{
+				{"Inspeccionar Arbol del Plan de Ejecucion (DBMS_XPLAN.DISPLAY_CURSOR)", "Muestra operaciones, predicados, coste y cardinalidad en cache", func() {
+					u.runSimulatedTask(
+						"Arbol de Plan de Ejecucion en Vivo (DBMS_XPLAN.DISPLAY_CURSOR)",
+						[]string{
+							"SQL> SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR('8f4k2m91x7p0q', NULL, 'ALLSTATS LAST +PREDICATE'));",
+							"Plan hash value: 3948102911",
+							"| Id | Operation               | Name            | E-Rows | Cost (%CPU)| A-Time      | Buffers |",
+							"|  0 | SELECT STATEMENT        |                 |        | 14820 (100)| 00:00:00.42 |   18420 |",
+							"|* 1 |  HASH JOIN              |                 |  14200 | 14820  (12)| 00:00:00.42 |   18420 |",
+							"|* 2 |   TABLE ACCESS FULL     | ERP_ORDERS      |   1200 |  4120  (10)| 00:00:00.14 |    6120 |",
+							"|  3 |   PARTITION RANGE ALL   |                 |  95000 | 10700  (14)| 00:00:00.26 |   12300 |",
+							"|  4 |    TABLE ACCESS FULL    | ERP_ORDER_LINES |  95000 | 10700  (14)| 00:00:00.24 |   12300 |",
+							"Predicate: 1 - access(O.ORDER_ID=L.ORDER_ID) | 2 - filter(O.STATUS=:1)",
+						},
+						nil,
+					)
+				}},
 				{"Fijar Mejor Plan Hash Value en SQL Plan Management (DBMS_SPM)", "DBMS_SPM.LOAD_PLANS_FROM_CURSOR_CACHE(fixed=>'YES')", func() {
 					u.Logf("[SPM] Plan optimo fijado en SQL Plan Baseline (FIXED=YES) -> [green]OK[-]")
 				}},
@@ -2880,18 +2907,45 @@ func (u *AppUI) buildAdvisorPage() tview.Primitive {
 		)
 	})
 
-	// Panel [3/3]: RAC Cache Fusion Latency, Datafile I/O Latency & Memory Advisors
+	// Panel [3/3]: RAC Cache Fusion, Datafile I/O, Resource Limits (gv$resource_limit), Wait Classes & Memory Advisors
 	ioGcTbl := tview.NewTable().SetBorders(false).SetSelectable(true, false)
 	ioGcTbl.SetBorder(true).SetTitle(u.winTitle(
-		fmt.Sprintf("[3/3] RAC CACHE FUSION, DATAFILE I/O & REDO/UNDO (Switches/h: %d │ ORA-01555: %d │ BufHit: %.1f%%)",
-			u.State.RedoUndo.RedoSwitchesLastHour, u.State.RedoUndo.ORA01555Count, u.State.RedoUndo.BufferCacheHitPct),
+		fmt.Sprintf("[3/3] RESOURCE LIMITS, WAIT CLASSES/AAS, CACHE FUSION, I/O & DG DESTS (Scrape: %dms │ BufHit: %.1f%%)",
+			u.State.CollectorHealth.LastScrapeDurationMs, u.State.RedoUndo.BufferCacheHitPct),
 		"←/→ Ventana",
 	))
-	gHeaders := []string{"SUBSISTEMA", "OBJETO / INSTANCIA", "ESTADO", "LATENCIA / FACTOR", "METRICA SECUNDARIA", "DIAGNOSTICO / RECOMENDACION"}
+	gHeaders := []string{"SUBSISTEMA", "OBJETO / INSTANCIA", "ESTADO", "METRICA PRINCIPAL", "METRICA SECUNDARIA / HWM", "DIAGNOSTICO / RECOMENDACION"}
 	for c, h := range gHeaders {
 		ioGcTbl.SetCell(0, c, HeaderCell(h))
 	}
 	gRow := 1
+	for _, rl := range u.State.ResourceLimits {
+		ioGcTbl.SetCell(gRow, 0, AccentCell("RESOURCE LIMIT"))
+		ioGcTbl.SetCell(gRow, 1, KeyCell(fmt.Sprintf("INST#%d %s", rl.InstID, rl.ResourceName)))
+		ioGcTbl.SetCell(gRow, 2, StatusCell(rl.Status))
+		ioGcTbl.SetCell(gRow, 3, tview.NewTableCell(fmt.Sprintf("Uso: %.1f%% (%d / %d)", rl.UsedPct, rl.CurrentUtilization, rl.LimitValue)))
+		ioGcTbl.SetCell(gRow, 4, tview.NewTableCell(fmt.Sprintf("HWM: %d (%.1f%%)", rl.MaxUtilization, rl.MaxUsedPct)))
+		ioGcTbl.SetCell(gRow, 5, tview.NewTableCell("gv$resource_limit (Previene ORA-00020/00018)"))
+		gRow++
+	}
+	for _, wc := range u.State.WaitClassStats {
+		ioGcTbl.SetCell(gRow, 0, AccentCell("WAIT CLASS/AAS"))
+		ioGcTbl.SetCell(gRow, 1, KeyCell(wc.WaitClass))
+		ioGcTbl.SetCell(gRow, 2, StatusCell(wc.Status))
+		ioGcTbl.SetCell(gRow, 3, tview.NewTableCell(fmt.Sprintf("%.1f%% DB Time (%.2f AAS)", wc.PctOfDBTime, wc.AAS)))
+		ioGcTbl.SetCell(gRow, 4, tview.NewTableCell(fmt.Sprintf("Tiempo: %.1fs", wc.TimeWaitedSec)))
+		ioGcTbl.SetCell(gRow, 5, tview.NewTableCell(fmt.Sprintf("Waits totales: %d", wc.TotalWaits)))
+		gRow++
+	}
+	for _, dg := range u.State.DataGuardDests {
+		ioGcTbl.SetCell(gRow, 0, AccentCell("DG DEST STATUS"))
+		ioGcTbl.SetCell(gRow, 1, KeyCell(fmt.Sprintf("%s (%s)", dg.DestName, dg.DBUniqueName)))
+		ioGcTbl.SetCell(gRow, 2, StatusCell(dg.Status))
+		ioGcTbl.SetCell(gRow, 3, tview.NewTableCell(fmt.Sprintf("Gap: %s (%d seq)", dg.GapStatus, dg.SeqGap)))
+		ioGcTbl.SetCell(gRow, 4, tview.NewTableCell(fmt.Sprintf("Arch:%d / Appl:%d", dg.ArchivedSeq, dg.AppliedSeq)))
+		ioGcTbl.SetCell(gRow, 5, tview.NewTableCell(fmt.Sprintf("%s │ Err: %s", dg.RecoveryMode, dg.DestError)))
+		gRow++
+	}
 	for _, cf := range u.State.CacheFusion {
 		ioGcTbl.SetCell(gRow, 0, AccentCell("CACHE FUSION"))
 		ioGcTbl.SetCell(gRow, 1, KeyCell(cf.InstanceName))

@@ -134,4 +134,56 @@ apply lag|0 seconds
 	}
 }
 
+func TestParseHarryPerformancePacks(t *testing.T) {
+	// Pack 1a: gv$resource_limit
+	resRaw := `
+1|processes|412|1140|1200|NO
+1|dml_locks|480|4610|4800|NO
+`
+	resLimits := ParseResourceLimitRows(executor.ParsePipeDelimitedOutput(resRaw))
+	if len(resLimits) != 2 {
+		t.Fatalf("expected 2 resource limit rows, got %d", len(resLimits))
+	}
+	if resLimits[0].ResourceName != "processes" || resLimits[0].MaxUtilization != 1140 || resLimits[0].Status != "WARNING" {
+		t.Fatalf("unexpected resource limit row 0: %+v", resLimits[0])
+	}
+
+	// Pack 1b: gv$system_wait_class + DB CPU
+	wcRaw := `
+1|User I/O|1842910|800.0
+1|DB CPU|0|700.0
+1|Concurrency|128410|500.0
+`
+	wcStats := ParseWaitClassRows(executor.ParsePipeDelimitedOutput(wcRaw))
+	if len(wcStats) != 3 || wcStats[0].WaitClass != "User I/O" || wcStats[0].PctOfDBTime != 40.0 || wcStats[2].Status != "CRITICAL" {
+		t.Fatalf("unexpected wait class stats: %+v", wcStats)
+	}
+
+	// Pack 2: gv$sqlstats Top SQL Consumers with P95/P99
+	topSQLRaw := `
+1|8f4k2m91x7p0q|1049281744|ERP_CORE|JDBC Thin Client|14820|1428.4|100.0|184.2|1142.8|82.4|19.0|0.0|48291040|9412800|14820|SELECT /*+ FULL(o) */ c.cust_id FROM orders o
+`
+	topSQL := ParseTopSQLConsumerRows(executor.ParsePipeDelimitedOutput(topSQLRaw))
+	if len(topSQL) != 1 {
+		t.Fatalf("expected 1 top SQL row, got %d", len(topSQL))
+	}
+	if topSQL[0].SQLID != "8f4k2m91x7p0q" || topSQL[0].DominantWait != "User I/O" || topSQL[0].P99ElapsedMs != 215.0 {
+		t.Fatalf("unexpected top SQL consumer: %+v", topSQL[0])
+	}
+
+	// Pack 3: gv$archive_dest_status + datum_age
+	dgRaw := `
+1|2|LOG_ARCHIVE_DEST_2|PRODCDB_DR|PRODCDB_DR_TNS|VALID|OPEN_READ-ONLY|MANAGED REAL TIME APPLY|MAXIMUM PERFORMANCE|ASYNCHRONOUS|NO GAP|48219|48219|NONE
+2|2|LOG_ARCHIVE_DEST_2|PRODCDB_DR|PRODCDB_DR_TNS|VALID|OPEN_READ-ONLY|MANAGED REAL TIME APPLY|MAXIMUM PERFORMANCE|ASYNCHRONOUS|LOG GAP|48225|48222|NONE
+`
+	dgDests := ParseDataGuardDestRows(executor.ParsePipeDelimitedOutput(dgRaw))
+	if len(dgDests) != 2 {
+		t.Fatalf("expected 2 Data Guard dest rows, got %d", len(dgDests))
+	}
+	if dgDests[0].GapStatus != "NO GAP" || dgDests[1].SeqGap != 3 || dgDests[1].GapStatus != "LOG GAP" {
+		t.Fatalf("unexpected Data Guard dest parse result: %+v", dgDests)
+	}
+}
+
+
 

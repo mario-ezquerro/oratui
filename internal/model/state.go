@@ -370,7 +370,7 @@ type ParallelQueryStat struct {
 // AdvisorFinding represents an automated DBA/SRE diagnostic finding with a 1-click remediation action.
 type AdvisorFinding struct {
 	Severity     string // CRITICAL, WARNING, INFO
-	Category     string // Plan Flip, Cache Fusion, Jobs, I/O & Undo, RMAN, Memory, Locks, SAN
+	Category     string // Plan Flip, Cache Fusion, Jobs, I/O & Undo, RMAN, Memory, Locks, SAN, Resource Limit, Data Guard
 	Title        string
 	Detail       string
 	Suggestion   string
@@ -378,6 +378,95 @@ type AdvisorFinding struct {
 	SQLID        string
 	ActionID     string
 	ActionTarget string
+}
+
+// ResourceLimitStat represents Oracle instance resource utilization and high-water marks (gv$resource_limit, inspired by harry-performance-scraper).
+type ResourceLimitStat struct {
+	InstID             int
+	ResourceName       string  // processes, sessions, enqueue_locks, enqueue_resources, parallel_max_servers
+	CurrentUtilization int     // current_utilization
+	MaxUtilization     int     // max_utilization (HWM since startup)
+	LimitValue         int     // limit_value (or 0 if UNLIMITED)
+	IsUnlimited        bool    // true if limit_value = UNLIMITED
+	UsedPct            float64 // CurrentUtilization * 100 / LimitValue
+	MaxUsedPct         float64 // MaxUtilization * 100 / LimitValue
+	Status             string  // OK, WARNING (>=80%), CRITICAL (>=90%)
+}
+
+// WaitClassMetric represents foreground wait class & DB CPU breakdown (gv$system_wait_class + gv$sys_time_model, inspired by harry-performance-scraper).
+type WaitClassMetric struct {
+	InstID        int
+	WaitClass     string  // DB CPU, User I/O, Commit, Concurrency, Application, Cluster, Network, System I/O, Configuration
+	TotalWaits    int64   // total_waits
+	TimeWaitedSec float64 // time_waited in seconds
+	PctOfDBTime   float64 // percentage share of total DB Time
+	AAS           float64 // Average Active Sessions contribution
+	Status        string  // OK, HIGH, CRITICAL
+}
+
+// TopSQLConsumer represents top SQL workload consumers by time breakdown & percentiles (gv$sqlstats + gv$sql, inspired by harry-performance-scraper).
+type TopSQLConsumer struct {
+	InstID         int
+	SQLID          string
+	PlanHashValue  int64
+	Schema         string
+	Module         string
+	Executions     int64
+	ElapsedSec     float64
+	AvgElapsedMs   float64
+	P95ElapsedMs   float64
+	P99ElapsedMs   float64
+	CPUSec         float64
+	IOWaitSec      float64
+	AppWaitSec     float64
+	ConcWaitSec    float64
+	ClusterWaitSec float64
+	BufferGets     int64
+	DiskReads      int64
+	RowsProcessed  int64
+	DominantWait   string // ON CPU, User I/O, Application Lock, Concurrency, Cluster GC
+	SQLText        string
+}
+
+// DataGuardDestStatus represents archive destination health, sequence gaps, and datum age (gv$archive_dest_status + v$dataguard_stats, inspired by harry-performance-scraper).
+type DataGuardDestStatus struct {
+	InstID         int
+	DestID         int
+	DestName       string // LOG_ARCHIVE_DEST_2
+	DBUniqueName   string // PRODCDB_DR
+	Destination    string // tns_service
+	Status         string // VALID, ERROR, DEFERRED, BAD PARAM, FULL
+	DatabaseMode   string // OPEN_READ-ONLY, MOUNTED-STANDBY
+	RecoveryMode   string // MANAGED REAL TIME APPLY, IDLE
+	ProtectionMode string // MAXIMUM PERFORMANCE, MAXIMUM AVAILABILITY
+	TransmitMode   string // ASYNCHRONOUS, SYNCHRONOUS
+	GapStatus      string // NO GAP, LOG GAP, RESOLVING GAP
+	ArchivedSeq    int64
+	AppliedSeq     int64
+	SeqGap         int64  // ArchivedSeq - AppliedSeq
+	DatumAgeSec    int    // Age of v$dataguard_stats datum
+	ApplyFinishSec int    // apply finish time in seconds
+	DestError      string // NONE or ORA-xxxxx
+}
+
+// SubCollectorStatus tracks individual collector execution timing and sample counts (inspired by harry-performance-scraper ScrapeStatusSample).
+type SubCollectorStatus struct {
+	Name        string
+	DurationMs  int64
+	SampleCount int
+	Success     bool
+	ErrorMsg    string
+}
+
+// CollectorRuntimeHealth tracks self-diagnostic scrape metrics, timeout pressure, and DCD connection state (inspired by harry-performance-scraper RuntimeSample).
+type CollectorRuntimeHealth struct {
+	LastScrapeDurationMs int64
+	ConfiguredTimeoutMs  int64
+	TimeoutBudgetPct     float64
+	ConnectionState      string // ACTIVE, QUARANTINED_DCD, DEGRADED
+	TotalSamples         int
+	ErrorCount           int
+	SubCollectors        []SubCollectorStatus
 }
 
 type EnvironmentState struct {
@@ -426,4 +515,11 @@ type EnvironmentState struct {
 	WaitChains      []WaitChainEntry
 	ParallelQueries []ParallelQueryStat
 	AdvisorFindings []AdvisorFinding
+
+	// New performance & operational diagnostics inspired by harry-performance-scraper
+	ResourceLimits  []ResourceLimitStat
+	WaitClassStats  []WaitClassMetric
+	TopSQLConsumers []TopSQLConsumer
+	DataGuardDests  []DataGuardDestStatus
+	CollectorHealth CollectorRuntimeHealth
 }

@@ -451,18 +451,42 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
         };
       }
     } catch (e) {
+      List<String> simOut = [
+        '>>> Conectando de forma autenticada ($_loggedInUser) con ${_selectedServer.name}...',
+        '>>> Ejecutando acción [$action] sobre [$target]...',
+        'SQL/OS> Operación ejecutada satisfactoriamente.',
+        'Estado verificado y métricas actualizadas en el recolector OpenTelemetry.',
+      ];
+      if (action == 'explain_sql_plan') {
+        simOut = [
+          '>>>SELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(\'$target\', NULL, \'ALLSTATS LAST +PEEKED_BINDS +PREDICATE +COST\'));',
+          'SQL_ID  $target, child number 0',
+          '----------------------------------------------------------------------------------------------------',
+          '| Id  | Operation                     | Name            | Starts | E-Rows | A-Rows |   A-Time   | Buffers |',
+          '----------------------------------------------------------------------------------------------------',
+          '|   0 | SELECT STATEMENT              |                 |      1 |        |    142 |00:00:00.43 |   18420 |',
+          '|   1 |  NESTED LOOPS                 |                 |      1 |    150 |    142 |00:00:00.43 |   18420 |',
+          '|*  2 |   TABLE ACCESS FULL           | ERP_ORDERS      |      1 |    150 |    142 |00:00:00.38 |   18110 |',
+          '|*  3 |   INDEX RANGE SCAN            | IDX_ORD_LINES   |    142 |      1 |    142 |00:00:00.05 |     310 |',
+          '----------------------------------------------------------------------------------------------------',
+          'Predicate Information (identified by operation id):',
+          '   2 - filter("O"."STATUS"=:1)',
+          '   3 - access("O"."ORDER_ID"="L"."ORDER_ID")',
+        ];
+      } else if (action == 'tune_resource_limit') {
+        simOut = [
+          '>>>ALTER SYSTEM SET ${target.split(":").first} = ${target.contains(":") ? target.split(":").last : "2000"} SCOPE=SPFILE;',
+          'System altered.',
+          'Parámetro actualizado en SPFILE para prevenir errores ORA-00020 / ORA-00018.',
+        ];
+      }
       resultPayload = {
         'success': true,
         'action': action,
         'target': target,
         'title': '$label (Simulación Local)',
         'command': 'POST ${_selectedServer.url}/api/v1/action {"action":"$action","target":"$target"}',
-        'output': [
-          '>>> Conectando de forma autenticada ($_loggedInUser) con ${_selectedServer.name}...',
-          '>>> Ejecutando acción [$action] sobre [$target]...',
-          'SQL/OS> Operación ejecutada satisfactoriamente.',
-          'Estado verificado y métricas actualizadas en el recolector OpenTelemetry.',
-        ],
+        'output': simOut,
         'duration_ms': 142,
         'executed_at': DateTime.now().toIso8601String(),
       };
@@ -1995,12 +2019,19 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
     final waitChains = (_stateData['WaitChains'] as List?) ?? [];
     final pqList = (_stateData['ParallelQueries'] as List?) ?? [];
     final redoUndo = (_stateData['RedoUndo'] as Map<String, dynamic>?) ?? {};
+    final resourceLimits = (_stateData['ResourceLimits'] as List?) ?? [];
+    final waitClasses = (_stateData['WaitClassStats'] as List?) ?? [];
+    final topSqlConsumers = (_stateData['TopSQLConsumers'] as List?) ?? [];
+    final dgDests = (_stateData['DataGuardDests'] as List?) ?? [];
+    final colHealth = (_stateData['CollectorHealth'] as Map<String, dynamic>?) ?? {};
 
     final logSw1h = _toInt(redoUndo['RedoSwitchesLastHour']);
     final ora1555 = _toInt(redoUndo['ORA01555Count']);
     final bufHit = _toDouble(redoUndo['BufferCacheHitPct'], 98.7);
     final pgaHit = _toDouble(redoUndo['PGACacheHitPct'], 96.4);
     final redoRate = _toDouble(redoUndo['RedoRateMBPerSec'], 18.4);
+    final scrapeMs = _toInt(colHealth['LastScrapeDurationMs'], 84);
+    final scrapeBudget = _toDouble(colHealth['TimeoutBudgetPct'], 0.8);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(14),
@@ -2046,6 +2077,12 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
                 '${waitChains.length} / ${pqList.length}',
                 waitChains.isNotEmpty ? const Color(0xFFFFAF00) : const Color(0xFF5FFFFF),
                 Icons.account_tree_outlined,
+              ),
+              _kpiCard(
+                'SCRAPE BUDGET',
+                '${scrapeMs}ms (${scrapeBudget.toStringAsFixed(1)}%)',
+                scrapeBudget < 50 ? const Color(0xFF5FFF5F) : const Color(0xFFFFAF00),
+                Icons.timer_outlined,
               ),
             ],
           ),
@@ -2467,6 +2504,304 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
                                   'Factor ${ma['SizeFactor']}x  ➔  ${ma['Recommendation']}',
                                   style: const TextStyle(fontSize: 12),
                                 ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // PACK 2 (HARRY-PERFORMANCE-SCRAPER): TOP SQL CONSUMERS + P95/P99 + DBMS_XPLAN
+          _nortonPanel(
+            title:
+                '🔥 PACK 2: TOP SQL CONSUMERS POR DELTA, PERCENTILES P95/P99 & VISOR DBMS_XPLAN (gv\$sqlstats)',
+            child: Column(
+              children: [
+                if (topSqlConsumers.isEmpty)
+                  const Text('Sin consumidores SQL registrados en gv\$sqlstats.'),
+                for (final sq in topSqlConsumers)
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.all(10),
+                    color: Colors.black26,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  _statusBadge(
+                                    'Espera Dom: ${sq['DominantWait'] ?? 'ON CPU'}',
+                                    (sq['DominantWait'] ?? 'ON CPU').toString() == 'ON CPU',
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'SQL_ID: ${sq['SQLID']} (PHV: ${sq['PlanHashValue']})  |  Esquema: ${sq['Schema']}  |  Execs: ${sq['Executions']}  |  Total: ${_toDouble(sq['ElapsedSec']).toStringAsFixed(1)}s',
+                                      style: const TextStyle(
+                                        color: Color(0xFFFFFF5F),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Latencia Media: ${_toDouble(sq['AvgElapsedMs']).toStringAsFixed(1)} ms  |  P95: ${_toDouble(sq['P95ElapsedMs']).toStringAsFixed(1)} ms  |  P99: ${_toDouble(sq['P99ElapsedMs']).toStringAsFixed(1)} ms  |  CPU: ${_toDouble(sq['CPUSec']).toStringAsFixed(1)}s • I/O: ${_toDouble(sq['IOWaitSec']).toStringAsFixed(1)}s • AppLock: ${_toDouble(sq['AppWaitSec']).toStringAsFixed(1)}s',
+                                style: const TextStyle(color: Color(0xFF5FFFFF), fontSize: 12),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Buffer Gets: ${sq['BufferGets']} • Disk Reads: ${sq['DiskReads']} • SQL: ${sq['SQLText']}',
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00AFAF),
+                            foregroundColor: Colors.black,
+                          ),
+                          onPressed: () => _executeRemoteAction(
+                            action: 'explain_sql_plan',
+                            target: '${sq['SQLID']}',
+                            label:
+                                'Inspeccionar Plan Real en Caché (DBMS_XPLAN.DISPLAY_CURSOR) para ${sq['SQLID']}',
+                          ),
+                          icon: const Icon(Icons.account_tree, size: 15),
+                          label: const Text(
+                            'VER PLAN (DBMS_XPLAN)',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          // PACK 1 (HARRY-PERFORMANCE-SCRAPER): RESOURCE LIMITS HWM + WAIT CLASSES / DB TIME
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _nortonPanel(
+                  title:
+                      '🚦 PACK 1A: LÍMITES DE RECURSOS & HWM (gv\$resource_limit — PREVENCIÓN ORA-00020/00018)',
+                  child: Column(
+                    children: [
+                      for (final rl in resourceLimits)
+                        Builder(
+                          builder: (context) {
+                            final rName = (rl['ResourceName'] ?? '').toString();
+                            final curVal = _toInt(rl['CurrentUtilization']);
+                            final maxVal = _toInt(rl['MaxUtilization']);
+                            final limVal = _toInt(rl['LimitValue']);
+                            final usedPct = _toDouble(rl['UsedPct']);
+                            final maxPct = _toDouble(rl['MaxUsedPct']);
+                            final stStr = (rl['Status'] ?? 'OK').toString();
+                            final newLimit = limVal > 0 ? ((limVal * 150) ~/ 100) : 2000;
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 5),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 155,
+                                    child: Text(
+                                      '[Inst #${rl['InstID']}] $rName',
+                                      style: const TextStyle(
+                                        color: Color(0xFFFFFF5F),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: _lcdProgressBar(
+                                      pct: usedPct > maxPct ? usedPct : maxPct,
+                                      customBadgeText:
+                                          'Act: ${usedPct.toStringAsFixed(1)}% | HWM: ${maxPct.toStringAsFixed(1)}%',
+                                      label:
+                                          'Actual: $curVal / HWM: $maxVal / Límite: $limVal [$stStr]',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  if (rName == 'processes' ||
+                                      rName == 'sessions' ||
+                                      rName == 'parallel_max_servers' ||
+                                      rName == 'dml_locks')
+                                    OutlinedButton(
+                                      onPressed: () => _executeRemoteAction(
+                                        action: 'tune_resource_limit',
+                                        target: '$rName:$newLimit',
+                                        label:
+                                            'Ampliar $rName a $newLimit en SPFILE (ALTER SYSTEM SET $rName=$newLimit SCOPE=SPFILE)',
+                                      ),
+                                      child: Text(
+                                        'SET $newLimit',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFF5FFFFF),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _nortonPanel(
+                  title:
+                      '⏱️ PACK 1B: DESGLOSE FOREGROUND WAIT CLASSES & AAS (gv\$system_wait_class + DB CPU)',
+                  child: Column(
+                    children: [
+                      for (final wc in waitClasses)
+                        Builder(
+                          builder: (context) {
+                            final pct = _toDouble(wc['PctOfDBTime']);
+                            final aas = _toDouble(wc['AAS']);
+                            final stStr = (wc['Status'] ?? 'OK').toString();
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 5),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        '[Inst #${wc['InstID']}] ${wc['WaitClass']} — AAS: ${aas.toStringAsFixed(2)} sesiones activas',
+                                        style: const TextStyle(
+                                          color: Color(0xFFFFFF5F),
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      _statusBadge(stStr, stStr == 'OK'),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 3),
+                                  _lcdProgressBar(
+                                    pct: pct,
+                                    customBadgeText: '${pct.toStringAsFixed(1)}% DB Time',
+                                    label:
+                                        'Tiempo Acumulado: ${_toDouble(wc['TimeWaitedSec']).toStringAsFixed(1)}s (${wc['TotalWaits']} esperas)',
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // PACK 3 (HARRY-PERFORMANCE-SCRAPER): DATA GUARD ARCHIVE DEST STATUS + COLLECTOR RUNTIME HEALTH
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _nortonPanel(
+                  title:
+                      '🛡️ PACK 3A: SALUD DE DESTINOS DATA GUARD & SEQUENCE GAPS (gv\$archive_dest_status)',
+                  child: Column(
+                    children: [
+                      for (final dg in dgDests)
+                        Builder(
+                          builder: (context) {
+                            final stStr = (dg['Status'] ?? 'VALID').toString();
+                            final gapStr = (dg['GapStatus'] ?? 'NO GAP').toString();
+                            final seqGap = _toInt(dg['SeqGap']);
+                            final healthy = stStr == 'VALID' && gapStr == 'NO GAP' && seqGap == 0;
+                            return Container(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              padding: const EdgeInsets.all(8),
+                              color: healthy ? Colors.black26 : const Color(0xFF440011),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${dg['DestName']} ➔ ${dg['DBUniqueName']} (${dg['RecoveryMode']} • ${dg['ProtectionMode']})',
+                                          style: const TextStyle(
+                                            color: Color(0xFFFFFF5F),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          'ArchSeq: ${dg['ArchivedSeq']} | AppSeq: ${dg['AppliedSeq']} | Gap: $seqGap logs ($gapStr) | Datum Age: ${dg['DatumAgeSec']}s | Error: ${dg['DestError']}',
+                                          style: const TextStyle(
+                                            color: Color(0xFF5FFFFF),
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  _statusBadge('$stStr ($gapStr)', healthy),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _nortonPanel(
+                  title:
+                      '🩺 PACK 3B: AUTODIAGNÓSTICO DEL RECOLECTOR SQL*PLUS BATCH (CollectorRuntimeHealth)',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Estado Conexión: ${colHealth['ConnectionState'] ?? 'CONNECTED'}  |  Duración Scrape: ${scrapeMs}ms / ${colHealth['ConfiguredTimeoutMs'] ?? 10000}ms (${scrapeBudget.toStringAsFixed(1)}% Budget)  |  Muestras: ${colHealth['TotalSamples'] ?? 1} (Errores: ${colHealth['ErrorCount'] ?? 0})',
+                        style: const TextStyle(
+                          color: Color(0xFF5FFF5F),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      for (final sc in ((colHealth['SubCollectors'] as List?) ?? []))
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '• Sub-Recolector [${sc['Name']}]: ${sc['RowsFetched']} filas en ${sc['DurationMs']} ms',
+                                style: const TextStyle(color: Color(0xFF5FFFFF), fontSize: 12),
+                              ),
+                              _statusBadge(
+                                (sc['Status'] ?? 'OK').toString(),
+                                (sc['Status'] ?? 'OK').toString() == 'OK',
                               ),
                             ],
                           ),
@@ -3982,7 +4317,159 @@ class _CommandCenterHomePageState extends State<CommandCenterHomePage>
           'ActionID': 'tune_memory_advisor',
           'ActionTarget': 'SGA:40960',
         },
+        {
+          'Severity': 'WARNING',
+          'Category': 'Resource Limit',
+          'Title': 'Límite de recursos "processes" con HWM en 95.0% (1140 / 1200)',
+          'Detail': 'Riesgo de ORA-00020 (maximum number of processes exceeded) en picos de carga.',
+          'Suggestion': 'Incrementar processes en SPFILE a 1800.',
+          'Impact': 'ALTO (Rechazo de nuevas conexiones)',
+          'ActionID': 'tune_resource_limit',
+          'ActionTarget': 'processes:1800',
+        },
       ],
+      'ResourceLimits': [
+        {
+          'InstID': 1,
+          'ResourceName': 'processes',
+          'CurrentUtilization': 412,
+          'MaxUtilization': 1140,
+          'LimitValue': 1200,
+          'UsedPct': 34.3,
+          'MaxUsedPct': 95.0,
+          'Status': 'WARNING',
+        },
+        {
+          'InstID': 1,
+          'ResourceName': 'sessions',
+          'CurrentUtilization': 445,
+          'MaxUtilization': 1490,
+          'LimitValue': 1824,
+          'UsedPct': 24.4,
+          'MaxUsedPct': 81.7,
+          'Status': 'OK',
+        },
+        {
+          'InstID': 1,
+          'ResourceName': 'parallel_max_servers',
+          'CurrentUtilization': 28,
+          'MaxUtilization': 64,
+          'LimitValue': 64,
+          'UsedPct': 43.8,
+          'MaxUsedPct': 100.0,
+          'Status': 'WARNING',
+        },
+      ],
+      'WaitClassStats': [
+        {
+          'InstID': 1,
+          'WaitClass': 'DB CPU',
+          'TotalWaits': 0,
+          'TimeWaitedSec': 18420.5,
+          'PctOfDBTime': 54.2,
+          'AAS': 2.16,
+          'Status': 'OK',
+        },
+        {
+          'InstID': 1,
+          'WaitClass': 'User I/O',
+          'TotalWaits': 4829100,
+          'TimeWaitedSec': 9840.2,
+          'PctOfDBTime': 28.9,
+          'AAS': 1.15,
+          'Status': 'OK',
+        },
+        {
+          'InstID': 1,
+          'WaitClass': 'Application',
+          'TotalWaits': 14210,
+          'TimeWaitedSec': 2890.4,
+          'PctOfDBTime': 8.5,
+          'AAS': 0.34,
+          'Status': 'OK',
+        },
+      ],
+      'TopSQLConsumers': [
+        {
+          'InstID': 1,
+          'SQLID': '8f4k2m91x7p0q',
+          'PlanHashValue': 3948102911,
+          'Schema': 'ERP_CORE',
+          'Module': 'JDBC Thin Client',
+          'Executions': 18420,
+          'ElapsedSec': 7892.9,
+          'AvgElapsedMs': 428.5,
+          'P95ElapsedMs': 621.3,
+          'P99ElapsedMs': 921.2,
+          'CPUSec': 1420.4,
+          'IOWaitSec': 5890.2,
+          'AppWaitSec': 410.1,
+          'BufferGets': 94821900,
+          'DiskReads': 14291000,
+          'DominantWait': 'User I/O',
+          'SQLText':
+              'SELECT /*+ INDEX(o ORD_PK) */ o.order_id, o.customer_id, l.amount FROM erp_orders o JOIN erp_order_lines l ON o.order_id = l.order_id WHERE o.status = :1',
+        },
+        {
+          'InstID': 2,
+          'SQLID': '3c9a11b04z88w',
+          'PlanHashValue': 1102938471,
+          'Schema': 'CRM_BATCH',
+          'Module': 'CRM_SYNC_WORKER',
+          'Executions': 4120,
+          'ElapsedSec': 2840.6,
+          'AvgElapsedMs': 689.4,
+          'P95ElapsedMs': 999.6,
+          'P99ElapsedMs': 1482.2,
+          'CPUSec': 310.2,
+          'IOWaitSec': 220.4,
+          'AppWaitSec': 2290.0,
+          'BufferGets': 12840100,
+          'DiskReads': 184200,
+          'DominantWait': 'Application Lock',
+          'SQLText':
+              'UPDATE crm_customers SET credit_limit = :1, updated_at = SYSDATE WHERE customer_id = :2',
+        },
+      ],
+      'DataGuardDests': [
+        {
+          'InstID': 1,
+          'DestID': 2,
+          'DestName': 'LOG_ARCHIVE_DEST_2',
+          'DBUniqueName': 'PRODCDB_DR',
+          'Status': 'VALID',
+          'RecoveryMode': 'MANAGED REAL TIME APPLY',
+          'ProtectionMode': 'MAXIMUM PERFORMANCE',
+          'GapStatus': 'NO GAP',
+          'ArchivedSeq': 48291,
+          'AppliedSeq': 48291,
+          'SeqGap': 0,
+          'DatumAgeSec': 2,
+          'DestError': 'NONE',
+        },
+      ],
+      'CollectorHealth': {
+        'LastScrapeDurationMs': 84,
+        'ConfiguredTimeoutMs': 10000,
+        'TimeoutBudgetPct': 0.84,
+        'ConnectionState': 'CONNECTED',
+        'TotalSamples': 142,
+        'ErrorCount': 0,
+        'SubCollectors': [
+          {
+            'Name': 'core_sqlplus_batch',
+            'DurationMs': 46,
+            'RowsFetched': 28,
+            'Status': 'OK',
+          },
+          {
+            'Name': 'advanced_ora_brabo_harry',
+            'DurationMs': 38,
+            'RowsFetched': 34,
+            'Status': 'OK',
+          },
+        ],
+      },
     };
   }
 
