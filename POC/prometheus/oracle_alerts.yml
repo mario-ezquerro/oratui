@@ -230,3 +230,43 @@ groups:
         annotations:
           summary: "{{ $value }} consultas paralelas con DOP degradado en {{ $labels.host }}"
           description: "Existen consultas en gv$px_session ejecutándose con menor paralelismo (DOP) del solicitado por falta de esclavos PX."
+
+      # 22. Pack 1: Límite de Recursos Crítico en gv$resource_limit (Prevención ORA-00020 / ORA-00018)
+      - alert: OracleResourceLimitNearExhaustion
+        expr: oratui_resource_limit_used_percent >= 80
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Recurso {{ $labels.resource }} al {{ $value }}% en instancia {{ $labels.inst_id }} ({{ $labels.host }})"
+          description: "El recurso {{ $labels.resource }} en gv$resource_limit supera el 80% de su límite configurado (riesgo ORA-00020 / ORA-00018). Incremente el parámetro en SPFILE."
+
+      # 23. Pack 2: Top SQL con Latencia P99 Elevada (> 1000 ms en gv$sqlstats)
+      - alert: OracleTopSQLHighP99Latency
+        expr: oratui_top_sql_p99_ms > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Top SQL {{ $labels.sql_id }} con P99={{ $value }} ms ({{ $labels.dominant_wait }}) en {{ $labels.host }}"
+          description: "La sentencia {{ $labels.sql_id }} (esquema {{ $labels.schema }}, PHV {{ $labels.phv }}) presenta latencia P99 elevada con espera dominante {{ $labels.dominant_wait }}. Inspeccione su plan con DBMS_XPLAN.DISPLAY_CURSOR."
+
+      # 24. Pack 3: Destino Data Guard con Gap de Secuencias o Error (gv$archive_dest_status)
+      - alert: OracleDataGuardArchiveDestGapOrError
+        expr: oratui_dataguard_dest_healthy == 0 or oratui_dataguard_dest_sequence_gap > 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Destino Data Guard {{ $labels.dest_name }} ({{ $labels.standby }}) con Gap={{ $value }} o error en {{ $labels.host }}"
+          description: "gv$archive_dest_status reporta estado {{ $labels.status }} ({{ $labels.gap_status }}) para {{ $labels.standby }}."
+
+      # 25. Pack 3: Presupuesto de Tiempo de Muestreo del Recolector Elevado (> 75%)
+      - alert: OraTuiCollectorScrapeBudgetHigh
+        expr: oratui_collector_timeout_budget_percent >= 75
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ciclo de recolección SQL*Plus en {{ $labels.host }} consumiendo {{ $value }}% del timeout"
+          description: "El recolector de ora-tui está tardando más del 75% de su presupuesto de timeout en responder."

@@ -1424,6 +1424,162 @@
       ],
       "title": "Distribución de Undo Tablespace (Active / Unexpired / Expired MB — v$undostat)",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 88 },
+      "id": 35,
+      "options": {
+        "displayMode": "lcd",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_resource_limit_used_percent{host=~\"$host\"}",
+          "legendFormat": "Inst #{{inst_id}} {{resource}} [% Actual — {{status}}]",
+          "refId": "A"
+        }
+      ],
+      "title": "Pack 1A: Límites de Recursos & Prevención ORA-00020/00018 (gv$resource_limit % Usado)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "yellow", "value": 35 },
+              { "color": "red", "value": 60 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 88 },
+      "id": 36,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_wait_class_dbtime_percent{host=~\"$host\"}",
+          "legendFormat": "Inst #{{inst_id}} {{wait_class}} (% DB Time)",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_wait_class_aas{host=~\"$host\"}",
+          "legendFormat": "Inst #{{inst_id}} {{wait_class}} (AAS)",
+          "refId": "B"
+        }
+      ],
+      "title": "Pack 1B: Desglose Foreground Wait Classes (% DB Time & AAS — gv$system_wait_class + DB CPU)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 250 },
+              { "color": "red", "value": 800 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 96 },
+      "id": 37,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "oratui_top_sql_p95_ms{host=~\"$host\"}",
+          "legendFormat": "P95: SQL {{sql_id}} ({{schema}}) [Espera Dom: {{dominant_wait}}]",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_top_sql_p99_ms{host=~\"$host\"}",
+          "legendFormat": "P99: SQL {{sql_id}} ({{schema}}) [PHV {{phv}}]",
+          "refId": "B"
+        }
+      ],
+      "title": "Pack 2: Top SQL Consumers por Delta — Percentiles de Latencia P95 y P99 (gv$sqlstats ms)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-oratui" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 96 },
+      "id": 38,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "expr": "oratui_dataguard_dest_sequence_gap{host=~\"$host\"}",
+          "legendFormat": "DG Sequence Gap ({{dest_name}} -> {{standby}} [{{gap_status}}])",
+          "refId": "A"
+        },
+        {
+          "expr": "oratui_dataguard_datum_age_seconds{host=~\"$host\"}",
+          "legendFormat": "DG Datum Age (s) ({{standby}})",
+          "refId": "B"
+        },
+        {
+          "expr": "oratui_collector_scrape_duration_ms{host=~\"$host\"}",
+          "legendFormat": "Duración Scrape Colector SQL*Plus (ms) [{{connection_state}}]",
+          "refId": "C"
+        }
+      ],
+      "title": "Pack 3: Destinos Data Guard Sequence Gap (gv$archive_dest_status) & Duración Scrape Colector (ms)",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
