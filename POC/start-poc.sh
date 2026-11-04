@@ -119,8 +119,8 @@ EOF
   fi
 
   # Asegurar que prometheus/prometheus.yml tenga file_sd_configs apuntando a /etc/prometheus/targets.yml
-  if ! grep -q "targets.yml" prometheus/prometheus.yml 2>/dev/null; then
-    cat > prometheus/prometheus.yml <<'EOF'
+  # (y eliminar el job host.docker.internal que falla por DNS en Linux)
+  cat > prometheus/prometheus.yml <<'EOF'
 global:
   scrape_interval: 10s
   evaluation_interval: 10s
@@ -139,20 +139,8 @@ scrape_configs:
       - files:
           - '/etc/prometheus/targets.yml'
         refresh_interval: 15s
-
-  - job_name: 'oracle-oratui-local-host'
-    scrape_interval: 10s
-    scrape_timeout: 8s
-    metrics_path: '/metrics'
-    static_configs:
-      - targets:
-          - 'host.docker.internal:9161'
-        labels:
-          application: 'ora-tui'
-          env: 'LOCAL'
-          role: 'oracle-local-host'
 EOF
-  fi
+  chmod -R a+rX prometheus/ grafana/ flutter-web/ 2>/dev/null || true
 
   echo ">>> Verificando conexión con http://${TARGET}/healthz ..."
   if curl -fsS --connect-timeout 3 "http://${TARGET}/healthz" >/dev/null 2>&1; then
@@ -191,6 +179,7 @@ if [[ -f prometheus/targets.yml ]]; then
     }
   ' prometheus/targets.yml > flutter-web/build/web/servers.json
   cp flutter-web/build/web/servers.json flutter-web/web/servers.json 2>/dev/null || true
+  chmod -R a+rX prometheus/ grafana/ flutter-web/ 2>/dev/null || true
   echo ">>> Catálogo multi-servidor de Flutter Web (servers.json) sincronizado."
 fi
 
