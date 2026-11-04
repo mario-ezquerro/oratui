@@ -204,3 +204,27 @@ contents:
       mode: 0644
       owner: root
       group: root
+  - src: ./agents/python/ora_tui_agent.py
+    dst: /usr/share/ora-tui/agents/python/ora_tui_agent.py
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: ./agents/python/install-aix.sh
+    dst: /usr/share/ora-tui/agents/python/install-aix.sh
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: ./agents/python/install-ibmi-as400.sh
+    dst: /usr/share/ora-tui/agents/python/install-ibmi-as400.sh
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: ./agents/python/README.md
+    dst: /usr/share/ora-tui/agents/python/README.md
+    file_info:
+      mode: 0644
+      owner: root
+      group: root

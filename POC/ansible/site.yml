@@ -134,14 +134,47 @@
 
           [Install]
           WantedBy=multi-user.target
+      when: ansible_system == "Linux" and (agent_runtime | default('go')) != 'python'
       notify: Reiniciar ora-tui-otel
 
-    - name: Recargar systemd, habilitar y arrancar servicio ora-tui-otel
+    - name: Recargar systemd, habilitar y arrancar servicio ora-tui-otel (Linux Go)
       ansible.builtin.systemd:
         name: ora-tui-otel
         daemon_reload: true
         enabled: true
         state: started
+      when: ansible_system == "Linux" and (agent_runtime | default('go')) != 'python'
+
+    # --------------------------------------------------------------------------
+    # Soporte Híbrido para IBM AIX (Oracle RAC) e IBM i / AS400 (PASE) con Python
+    # --------------------------------------------------------------------------
+    - name: Crear directorio temporal /tmp/oratui-python en servidores AIX / IBM i (Python Agent)
+      ansible.builtin.file:
+        path: /tmp/oratui-python
+        state: directory
+        mode: "0755"
+      when: ansible_system in ["AIX", "OS400"] or (agent_runtime | default('go')) == 'python'
+
+    - name: Copiar Agente Python (ora_tui_agent.py) e instaladores de daemon para AIX y AS/400
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../agents/python/{{ item }}"
+        dest: "/tmp/oratui-python/{{ item }}"
+        mode: "0755"
+      loop:
+        - ora_tui_agent.py
+        - install-aix.sh
+        - install-ibmi-as400.sh
+      when: ansible_system in ["AIX", "OS400"] or (agent_runtime | default('go')) == 'python'
+
+    - name: Instalar y registrar Daemon SRC (oratui) en IBM AIX con Oracle RAC
+      ansible.builtin.command: >
+        /tmp/oratui-python/install-aix.sh --port={{ node_otel_port }}
+      when: ansible_system == "AIX"
+
+    - name: Instalar y someter Trabajo Batch SBMJOB (ORATUI) en IBM i / AS400 (PASE)
+      ansible.builtin.command: >
+        /tmp/oratui-python/install-ibmi-as400.sh --port={{ node_otel_port }}
+      when: ansible_system == "OS400"
 
     - name: Comprobar si firewalld está en ejecución
       ansible.builtin.command: systemctl is-active firewalld

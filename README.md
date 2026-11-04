@@ -2,12 +2,14 @@
 
 ![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)
 ![Version](https://img.shields.io/badge/Version-1.10.0-brightgreen)
-![Platform](https://img.shields.io/badge/Platform-RHEL%20%7C%20Oracle%20Linux%207%2F8%2F9%20%7C%20Debian%2FUbuntu%20%7C%20macOS%20(Mock)-red)
-![Dependencies](https://img.shields.io/badge/CGO_ENABLED-0%20(Zero%20Deps)-success)
+![Platform](https://img.shields.io/badge/Platform-RHEL%20%7C%20Oracle%20Linux%20%7C%20Debian%20%7C%20IBM%20AIX%20(RAC)%20%7C%20IBM%20i%20(AS%2F400)-red)
+![Dependencies](https://img.shields.io/badge/CGO_ENABLED-0%20%2B%20Python%203%20Stdlib-success)
 ![Telemetry](https://img.shields.io/badge/OpenTelemetry%20%26%20Prometheus-Port%209161-orange)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
-**`ora-tui`** es una herramienta interactiva de consola (**Terminal User Interface - TUI**) y **Exportador OpenTelemetry / Prometheus embebido** escrita en **Go** y compilada como un único binario estático sin dependencias externas (`CGO_ENABLED=0`).
+**`ora-tui`** es una herramienta interactiva de consola (**Terminal User Interface - TUI**) y **Exportador OpenTelemetry / Prometheus embebido** con **arquitectura dual Go + Python**:
+* **En Linux (`RHEL / Oracle Linux / Debian / Ubuntu`)**: Binario estático único en **Go** (`CGO_ENABLED=0`, cero dependencias externas).
+* **En IBM AIX (con Oracle Database RAC + SAN MPIO) e IBM i (`AS/400 PASE`)**: Agente nativo en **Python 3 (100% Librería Estándar, cero dependencias `pip`)** incluido en **[`agents/python/ora_tui_agent.py`](file:///Users/mario/repositorios/oratui/agents/python/ora_tui_agent.py)** con el mismo contrato de métricas (`:9161`), consola TUI (`curses`) e instaladores de daemon nativos (**AIX `SRC` `startsrc -s oratui`** y **AS/400 `SBMJOB JOB(ORATUI)`**). Consulta la guía paso a paso en **[`agents/python/README.md`](file:///Users/mario/repositorios/oratui/agents/python/README.md)**.
 
 Permite analizar y operar en tiempo real entornos **Oracle RAC**, **Oracle Restart**, **Oracle Single Instance** y la **salud del servidor Linux y almacenamiento SAN/Multipath**:
 * **10 Módulos Interactivos de Análisis, Diagnóstico Avanzado y Mantenimiento (`1`..`9` + `0`)**: Clusterware/Instancias/PDBs, Sesiones/Bloqueos TX-TM, Tablespaces/Datafiles (`AUTOEXTEND`), Segmentos/Objetos Inválidos, ASM/Listeners, Backups RMAN/Flashback/Data Guard, Alert Log (`ORA-`), **Servidor Linux/Discos/SAN Multipath (`multipath -ll`, HBA FC, Inodos `df -i`, HugePages/THP)**, Centro de Mantenimiento y **`0. Diagnóstico Avanzado & Advisor`** (*SQL Plan Flips* + *SPM Baselines*, canales RMAN en vivo, *Scheduler Jobs* de negocio, *RAC Cache Fusion*, latencia I/O por Datafile, Redo/Undo `ORA-01555`, *Memory Advisor*, *Wait Chains* y degradación *Parallel Query DOP*).
@@ -304,7 +306,9 @@ Una vez iniciado, puedes consultar:
 * **`http://<IP-SERVIDOR>:9161/healthz`** $\rightarrow$ Healthcheck ligero (`HTTP 200 OK`).
 * **`http://<IP-SERVIDOR>:9161/`** $\rightarrow$ Página web de resumen con enlaces directos a los endpoints.
 
-### 3. Cómo iniciarlo como Servicio Daemon (`systemd`) con Blindaje de Memoria y CPU (`v1.10.0`)
+### 3. Cómo iniciarlo como Servicio Daemon en Cada Sistema Operativo (Linux `systemd`, IBM AIX `SRC` e IBM i / AS400 `SBMJOB`)
+
+#### Caso A: Servidores Linux (`RHEL / Oracle Linux / Debian`) — Binario Go + `systemd`
 El paquete `.rpm` y `.deb` instala automáticamente el servicio **`/usr/lib/systemd/system/ora-tui-otel.service`** (y una copia en `/usr/share/ora-tui/ora-tui-otel.service`) configurado con límites estrictos de memoria y CPU (`GOGC=50`, `GOMEMLIMIT=48MiB`, `MemoryHigh=48M`, `MemoryMax=96M`, `CPUQuota=15%`, `TasksMax=64`, `Nice=10`) para garantizar que el daemon jamás sature los recursos del servidor Oracle. Para dejarlo activo de forma permanente:
 
 ```bash
@@ -329,6 +333,40 @@ sudo systemctl edit ora-tui-otel
 # Environment="ORA_TUI_INTERVAL=10s"
 sudo systemctl restart ora-tui-otel
 ```
+
+#### Caso B: IBM AIX con Oracle Database RAC — Agente Python + Subsistema Nativo AIX `SRC` (`mkssys` / `startsrc`)
+En servidores **IBM AIX** con **Oracle Database RAC** donde no se utiliza Go, el agente [`agents/python/ora_tui_agent.py`](file:///Users/mario/repositorios/oratui/agents/python/ora_tui_agent.py) recolecta en vivo el cluster RAC (`ocr.loc`, `olsnodes`, `gv$instance`, `gv$session`, `dba_tablespace_usage_metrics`, `v$asm_diskgroup`, `gv$resource_limit` HWM, `gv$system_wait_class` AAS, Top SQL P95/P99 y Data Guard Gaps) además de métricas de LPAR (`lparstat`, `svmon -G`, `lsps -s`) y caminos SAN MPIO (`lspath` / `fcs*`).
+```ksh
+# 1. Instalar aplicación interactiva (/usr/bin/ora-tui) y registrar daemon en AIX SRC + /etc/inittab:
+cd agents/python
+chmod +x install-aix.sh ora_tui_agent.py
+sudo ./install-aix.sh --port=9161 --interval=5
+
+# 2. Usar la aplicación interactiva TUI en consola:
+ora-tui
+
+# 3. Operar el daemon en AIX SRC (System Resource Controller):
+lssrc -s oratui      # Ver estado y PID del daemon
+stopsrc -s oratui    # Parar el daemon
+startsrc -s oratui   # Arrancar el daemon
+```
+
+#### Caso C: IBM i (AS/400 — Entorno PASE) — Agente Python + Subsistema `SBMJOB` / `ADDAJE`
+En sistemas **IBM i (AS/400)**, el agente [`agents/python/ora_tui_agent.py`](file:///Users/mario/repositorios/oratui/agents/python/ora_tui_agent.py) se ejecuta con el Python 3 de PASE (`/QOpenSys/pkgs/bin/python3`) y recolecta `QSYS2.SYSTEM_STATUS_INFO`, IFS (`df -P -k`) y subsistemas DB2 for i:
+```sh
+# 1. Instalar comando interactivo (/QOpenSys/usr/bin/ora-tui) y someter trabajo batch ORATUI:
+cd agents/python
+chmod +x install-ibmi-as400.sh ora_tui_agent.py
+./install-ibmi-as400.sh --port=9161 --interval=10
+
+# 2. Usar la aplicación interactiva TUI desde SSH (PASE):
+/QOpenSys/usr/bin/ora-tui
+
+# 3. Gestionar el daemon batch en AS/400:
+/QOpenSys/usr/bin/system "WRKACTJOB JOB(ORATUI)"
+/QOpenSys/usr/bin/system "ENDJOB JOB(ORATUI) OPTION(*CNTRLD) DELAY(10)"
+```
+*(Consulta la documentación completa de AIX RAC y AS/400, incluyendo el registro de arranque automático IPL con `ADDAJE`, en **[`agents/python/README.md`](file:///Users/mario/repositorios/oratui/agents/python/README.md)**).*
 
 ### 4. Catálogo Completo de Métricas Expuestas (`/metrics`)
 

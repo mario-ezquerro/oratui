@@ -83,6 +83,18 @@ ansible-playbook -i inventory.ini site.yml
 
 ---
 
+## 🐍 Soporte Híbrido para Flotas con Linux (Go), IBM AIX con Oracle RAC (Python) e IBM i / AS400 (Python)
+
+Cuando tu infraestructura combina servidores **Linux** (donde corre el binario estático en Go) con servidores **IBM AIX ejecutando Oracle Database RAC** o **IBM i (AS/400)** donde solo se permite **Python**, tienes todo integrado en **[`agents/python/`](file:///Users/mario/repositorios/oratui/agents/python/README.md)**:
+* **Agente 100% Python 3 Standard Library ([`ora_tui_agent.py`](file:///Users/mario/repositorios/oratui/agents/python/ora_tui_agent.py))**: No requiere `pip` ni compilar extensiones C. En **AIX** autodescubre el cluster **Oracle RAC** (`ocr.loc`, `olsnodes`, `gv$instance`, `gv$session`, `dba_tablespace_usage_metrics`, `v$asm_diskgroup`, `gv$resource_limit` HWM, `gv$system_wait_class` AAS, Top SQL P95/P99 y Data Guard Gaps) junto con LPAR (`lparstat`, `svmon -G`, `lsps -s`) y caminos SAN MPIO (`lspath` / `fcs*`).
+* **Uso Interactivo y Daemons Nativos**:
+  * **Linux (Go)**: Consola `sudo ora-tui` y daemon `systemd` (`systemctl enable --now ora-tui-otel`).
+  * **IBM AIX + Oracle RAC (Python)**: Instalador [`install-aix.sh`](file:///Users/mario/repositorios/oratui/agents/python/install-aix.sh), consola `ora-tui` (`curses`) y daemon nativo **AIX `SRC`** (`startsrc -s oratui`, `lssrc -s oratui`, `/etc/inittab`).
+  * **IBM i / AS400 PASE (Python)**: Instalador [`install-ibmi-as400.sh`](file:///Users/mario/repositorios/oratui/agents/python/install-ibmi-as400.sh), consola `/QOpenSys/usr/bin/ora-tui` y daemon batch **`SBMJOB JOB(ORATUI)`** + autoarranque en IPL con **`ADDAJE`**.
+* Consulta todos los pasos detallados en **[`agents/python/README.md`](file:///Users/mario/repositorios/oratui/agents/python/README.md)**.
+
+---
+
 ## 🏗️ Opción C: Gobierno de Flota con Jenkins ([`Jenkinsfile`](file:///Users/mario/repositorios/oratui/Jenkinsfile))
 
 El [`Jenkinsfile`](file:///Users/mario/repositorios/oratui/Jenkinsfile) incluye parámetros de tipo `password` (`FLUTTER_WEB_PASSWORD` y `ORATUI_API_TOKEN`) para rotar contraseñas y tokens en toda la flota Oracle y en el contenedor Flutter Web con un solo clic. Consulta todos los detalles en **[`POC/jenkins/README.md`](file:///Users/mario/repositorios/oratui/POC/jenkins/README.md)**.
