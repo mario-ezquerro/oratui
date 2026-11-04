@@ -99,6 +99,8 @@ EOF
     application: "ora-tui"
 EOF
   else
+    # Asegurar salto de línea final antes de hacer append para no romper el YAML
+    [[ -n "$(tail -c 1 prometheus/targets.yml 2>/dev/null || true)" ]] && echo "" >> prometheus/targets.yml
     # Si ya estaba ese target en targets.yml no lo duplicamos; si no, lo añadimos
     if grep -q "\"${TARGET}\"" prometheus/targets.yml 2>/dev/null; then
       echo ">>> El servidor ${TARGET} ya estaba en prometheus/targets.yml."
@@ -114,6 +116,42 @@ EOF
 EOF
       echo ">>> Servidor ${TARGET} (${TARGET_ENV}) añadido a prometheus/targets.yml."
     fi
+  fi
+
+  # Asegurar que prometheus/prometheus.yml tenga file_sd_configs apuntando a /etc/prometheus/targets.yml
+  if ! grep -q "targets.yml" prometheus/prometheus.yml 2>/dev/null; then
+    cat > prometheus/prometheus.yml <<'EOF'
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  external_labels:
+    monitor: 'oratui-poc'
+
+rule_files:
+  - "/etc/prometheus/oracle_alerts.yml"
+
+scrape_configs:
+  - job_name: 'oracle-oratui-poc'
+    scrape_interval: 10s
+    scrape_timeout: 8s
+    metrics_path: '/metrics'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets.yml'
+        refresh_interval: 15s
+
+  - job_name: 'oracle-oratui-local-host'
+    scrape_interval: 10s
+    scrape_timeout: 8s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - 'host.docker.internal:9161'
+        labels:
+          application: 'ora-tui'
+          env: 'LOCAL'
+          role: 'oracle-local-host'
+EOF
   fi
 
   echo ">>> Verificando conexión con http://${TARGET}/healthz ..."
@@ -160,12 +198,15 @@ echo ""
 echo ">>> Levantando contenedores Docker (Flutter Web Command & SRE Center + Prometheus + Grafana)..."
 if docker compose version >/dev/null 2>&1; then
   docker compose up -d --build
+  docker compose restart prometheus >/dev/null 2>&1 || true
 elif command -v docker-compose >/dev/null 2>&1; then
   docker-compose up -d --build
+  docker-compose restart prometheus >/dev/null 2>&1 || true
 else
   echo "[ERROR] No se encontró 'docker compose' ni 'docker-compose' en este servidor."
   exit 1
 fi
+curl -fsS -X POST "http://localhost:9090/-/reload" >/dev/null 2>&1 || true
 
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 if [[ -z "$SERVER_IP" ]]; then
